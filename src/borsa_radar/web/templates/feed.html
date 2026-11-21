@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Akış · Borsa Radar{% endblock %}
+{% from "_macros.html" import event_card, quote_box, cal_list %}
+{% block content %}
+<div class="pf-head"><div><h1 style="margin-bottom:2px">Akış</h1><p class="lede">Radarın topladığı tüm gelişmeler: haber, analist notu, SEC, makro ve veri; her biri yapay zekâ ile önem ve yön puanlı.</p></div></div>
+<div class="quotes">
+  {% for t in nav_tickers %}{{ quote_box(t.symbol, quotes.get(t.symbol)) }}{% endfor %}
+</div>
+<div class="grid">
+  <section>
+    <form class="filters" method="get" action="/akis">
+      <select name="symbol" onchange="this.form.submit()">
+        <option value="">Tüm hisseler + makro</option>
+        {% for t in nav_tickers %}<option value="{{ t.symbol }}" {% if f.symbol == t.symbol %}selected{% endif %}>{{ t.symbol }}</option>{% endfor %}
+      </select>
+      <select name="type" onchange="this.form.submit()">
+        <option value="">Tüm türler</option>
+        {% for k, v in [('news','Haber'),('rating','Analist'),('filing','SEC'),('macro','Makro'),('data','Veri'),('reg','Düzenleme'),('contract','Devlet'),('flow','Pozisyon')] %}
+        <option value="{{ k }}" {% if f.type == k %}selected{% endif %}>{{ v }}</option>{% endfor %}
+      </select>
+      <select name="imp" onchange="this.form.submit()">
+        {% for i in [1,2,3,4,5] %}<option value="{{ i }}" {% if f.imp == i %}selected{% endif %}>önem ≥ {{ i }}</option>{% endfor %}
+      </select>
+      <select name="days" onchange="this.form.submit()">
+        {% for d in [1,3,7,14,30] %}<option value="{{ d }}" {% if f.days == d %}selected{% endif %}>{{ d }} gün</option>{% endfor %}
+      </select>
+      <label class="muted"><input type="checkbox" name="all" value="1" {% if f.all %}checked{% endif %} onchange="this.form.submit()"> analiz edilmemiş/ilgisizler dahil</label>
+    </form>
+    {% for e in rows %}{{ event_card(e) }}{% else %}
+      <div class="empty">Bu filtrede gelişme yok. Önem eşiğini düşürmeyi deneyin.</div>
+    {% endfor %}
+  </section>
+  <aside>
+    <div class="panel">
+      <h2 style="margin-top:0">Yaklaşan (48 saat)</h2>
+      {{ cal_list(upcoming) }}
+      <div style="margin-top:8px"><a href="/calendar">Tüm takvim →</a></div>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2 style="margin-top:0">Önem ölçeği</h2>
+      <div class="muted" style="font-size:13px">
+        <span class="badge imp5">5</span> tezi değiştiren<br>
+        <span class="badge imp4">4</span> fiyatı net etkiler<br>
+        <span class="badge imp3">3</span> kayda değer<br>
+        <span class="badge">2</span> küçük · <span class="badge">1</span> gürültü<br><br>
+        Telegram: hisse ≥ eşik, analist notu değişimi her zaman, makro ≥ eşik. <a href="/settings">Ayarlar</a>
+      </div>
+    </div>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Özetler · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head"><div><h1 style="margin-bottom:2px">Günlük özetler</h1><p class="lede">Sabah ve akşam Telegram özetleri: portföy, piyasa rejimi, setup'lar ve önemli gelişmeler.</p></div></div>
+{% if request.query_params.get('sending') %}<div class="flash">Özet hazırlanıyor, ~1 dk içinde Telegram'a gelecek ve burada görünecek.</div>{% endif %}
+<form method="post" action="/digests/send" class="filters">
+  <select name="kind"><option value="morning">Sabah özeti</option><option value="evening">Akşam özeti</option></select>
+  <button>Şimdi üret ve gönder</button>
+</form>
+{% for d in rows %}
+<details class="panel digest-card"{% if loop.first %} open{% endif %}>
+  <summary><b>{{ {'morning': '☀️ Sabah özeti', 'evening': '🌆 Akşam özeti', 'weekly': '🗓 Haftalık özet'}.get(d.kind, d.kind) }}</b>
+    <span class="muted">· {{ d.day|trdate }} · {{ d.created_at|local('%H:%M') }}</span></summary>
+  <div class="digest-text">{{ d.content|safe }}</div>
+</details>
+{% else %}<div class="empty">Henüz özet yok. Hafta içi sabah ve akşam otomatik oluşur.</div>{% endfor %}
+{% endblock %}

@@ -1,0 +1,206 @@
+{% extends "base.html" %}
+{% block title %}Portföy · Borsa Radar{% endblock %}
+{% block content %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+
+<div class="pf-head">
+  <div>
+    <h1>Portföy {% set rb = regime_badge() %}{% if rb %}<a class="regime-chip {{ rb.tone }}" href="/piyasa" title="Piyasa rejimi · T {{ rb.day }}">Rejim: <b>{{ rb.label }}</b> {{ rb.overall|round|int }}</a>{% endif %}</h1>
+    {% if headline %}<p class="lede">{{ headline }}</p>{% endif %}
+  </div>
+  <div class="stamp">
+    Fiyat: Yahoo günlük kapanış · son gün <b>{{ perf.as_of | trdate if perf.as_of else '—' }}</b>
+    {% if updated %} · güncellendi {{ updated.updated_at | ago }}{% endif %}
+    <form method="post" action="/portfolio/refresh" class="inline"><button class="secondary sm">↻ Yenile</button></form>
+  </div>
+</div>
+
+{% if not perf.as_of %}
+<div class="panel empty-state">
+  <h3>Portföyün henüz boş</h3>
+  <p>Revolut dökümünü içe aktar ya da işlemlerini elle gir. Sonra bu sayfa senin rakamlarınla dolar.</p>
+  <p><a class="btn" href="/portfolio/trades#import">Revolut CSV içe aktar</a> <a class="btn secondary" href="/portfolio/trades#add">İşlem ekle</a></p>
+  <p class="muted small">Revolut uygulaması → Yatırım → ··· → Belgeler → Aracı kurum hesabı → Hesap dökümü → CSV</p>
+</div>
+{% else %}
+
+{% set d = perf.periods.day %}
+<section class="hero">
+  <div class="hero-main">
+    <div class="lbl">Toplam portföy</div>
+    <div class="big">{{ perf.value | usd }}</div>
+    <div class="today {{ d.pnl | sgn }}">
+      <span class="lbl">Son gün</span> <b>{{ d.pnl | susd }}</b> · <b>{{ d.pct | pct }}</b>
+      <div class="bench">{% for k, v in d.bench.items() %}{{ k }} <span class="{{ v | sgn }}">{{ v | pct }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
+    <div class="muted small facts">
+      Net yatırılan {{ perf.deposits | usd }} · Nakit {{ perf.cash | usd }}
+      {% if perf.prev_year_close %}<br>{{ perf.prev_year_close.day[:4] }} kapanışı {{ perf.prev_year_close.value | usd }}{% endif %}
+      {% if perf.prev_close %} · Önceki kapanış ({{ perf.prev_close.day | trdate }}) {{ perf.prev_close.value | usd }}{% endif %}
+      {% if perf.implicit_funding > 25 %}<br><span class="warn">Kayıtsız para yatırma varsayıldı: {{ perf.implicit_funding | usd }}</span> <a href="#how" title="Neden?">?</a>{% endif %}
+    </div>
+  </div>
+  <div class="tiles">
+    {% for key, label in periods if key not in ('day',) %}
+      {% set p = perf.periods[key] %}
+      <div class="tile">
+        <div class="lbl">{{ label }}</div>
+        <div class="val {{ p.pct | sgn }}">{{ p.pct | pct }}</div>
+        <div class="sub {{ p.pnl | sgn }}">{{ p.pnl | susd }}</div>
+        <div class="bench">{% for k, v in p.bench.items() %}{{ k }} <span class="{{ v | sgn }}">{{ v | pct }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+      </div>
+    {% endfor %}
+    <div class="tile">
+      <div class="lbl">Yıllık ort. (CAGR)</div>
+      <div class="val {{ perf.cagr | sgn }}">{{ perf.cagr | pct if perf.cagr is not none else '—' }}</div>
+      <div class="sub muted">{{ perf.start_day | trdate }} · {{ '%.1f' % perf.years }} yıl</div>
+      <div class="bench">{% for k, v in perf.bench_cagr.items() %}{{ k }} <span class="{{ v | sgn }}">{{ v | pct }}</span>{% if not loop.last %} · {% endif %}{% endfor %}</div>
+    </div>
+    <div class="tile">
+      <div class="lbl">Zirveden uzaklık</div>
+      <div class="val {{ perf.ath.dd_pct | sgn }}">{{ perf.ath.dd_pct | pct }}</div>
+      <div class="sub muted">Zirve {{ perf.ath.value | usd }} · {{ perf.ath.day | trdate }}</div>
+    </div>
+    <div class="tile">
+      <div class="lbl">Açık / kapanan</div>
+      <div class="val">{{ pos | length }} <span class="muted">/ {{ n_closed }}</span></div>
+      <div class="sub muted">{% if n_option %}{{ n_option }} opsiyon · {% endif %}{% if avg_hold %}ort. elde tutma {{ avg_hold | round | int }} gün{% endif %}</div>
+      <div class="bench"><a href="/portfolio/closed">kapananlar →</a></div>
+    </div>
+  </div>
+</section>
+
+<div class="grid2">
+  <section class="panel">
+    <h3 class="ph">Alt portföy dağılımı</h3>
+    {% set ns = namespace(acc=0, stops=[]) %}
+    {% for a in alloc %}{% set share = [a.share or 0, 0] | max %}{% set ns.stops = ns.stops + [(a.sub.color or '#8b949e') ~ ' ' ~ ns.acc ~ '% ' ~ (ns.acc + share) ~ '%'] %}{% set ns.acc = ns.acc + share %}{% endfor %}
+    <div class="alloc">
+      <div class="donut" style="background: conic-gradient({{ ns.stops | join(', ') }}{% if ns.acc < 100 %}, #30363d {{ ns.acc }}% 100%{% endif %})">
+        <div class="hole"><span class="lbl">Toplam</span><b>{{ perf.value | usd }}</b></div>
+      </div>
+      <table class="compact">
+        <tr><th>Alt portföy</th><th class="num">Pozisyon</th><th class="num">Nakit</th><th class="num">Toplam</th><th class="num">Pay</th></tr>
+        {% for a in alloc %}
+        <tr>
+          <td><span class="dot" style="background:{{ a.sub.color or '#8b949e' }}"></span><b>{{ a.sub.code }}</b> {{ a.sub.name }}</td>
+          <td class="num">{{ a.positions | usd }}</td>
+          <td class="num {{ 'neg' if a.cash < -0.5 }}">{{ a.cash | usd }}</td>
+          <td class="num">{{ a.total | usd }}</td>
+          <td class="num">{{ '%.1f' % a.share if a.share is not none else '—' }}%</td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+  <section class="panel">
+    <div class="ph-row">
+      <h3 class="ph">Performans · getiri endeksi</h3>
+      <div class="tabs" id="ranges">
+        {% for r, l in [('1m','1A'),('3m','3A'),('ytd','YTD'),('1y','1Y'),('all','Tümü')] %}<a href="#" data-r="{{ r }}" class="{{ 'active' if r == 'ytd' }}">{{ l }}</a>{% endfor %}
+      </div>
+    </div>
+    <div id="pchart" class="pchart"></div>
+    <div class="legend small"><span class="sw" style="background:#3fb950"></span>Portföy <span class="sw" style="background:#8b949e"></span>SPX <span class="sw" style="background:#a371f7"></span>NDX <span class="sw" style="background:#d29922"></span>IXIC</div>
+    <p class="muted small">Zaman ağırlıklı getiri: para yatırıp çekmek eğriyi oynatmaz, yalnız seçimlerin performansı görünür.</p>
+  </section>
+</div>
+
+{% for a in alloc %}
+{% set sp = a.perf.periods %}
+<details class="subcard" {% if a.n %}open{% endif %}>
+  <summary>
+    <span class="code" style="background:{{ a.sub.color or '#8b949e' }}22;color:{{ a.sub.color or '#8b949e' }}">{{ a.sub.code }}</span>
+    <span class="name">{{ a.sub.name }}</span>
+    <span class="muted">{{ a.n }} pozisyon · {{ a.positions | usd }}</span>
+    <span class="grow"></span>
+    {% for key, label in [('day','Gün'),('week','Hafta'),('mtd','Ay'),('ytd','YTD')] %}
+      {% set p = sp.get(key) %}
+      {% if p %}<span class="chip {{ p.pct | sgn }}" title="{{ p.pnl | susd }}">{{ label }} {{ p.pct | pct }}</span>{% endif %}
+    {% endfor %}
+    <span class="chip">Pay {{ '%.1f' % a.share if a.share is not none else '—' }}%</span>
+  </summary>
+  {% set rows = pos | selectattr('sub_id', 'equalto', a.sub.id) | list %}
+  {% if rows %}
+  <div class="table-scroll">
+  <table class="postable">
+    <tr><th>Sembol</th><th class="num">Adet</th><th class="num">Ort. maliyet</th><th class="num">Fiyat</th><th class="num">Gün</th>
+        <th class="num">Değer</th><th class="num">K/Z</th><th class="num">K/Z %</th><th class="num">Ağırlık</th></tr>
+    {% for p in rows %}
+    <tr>
+      <td><a href="/h/{{ p.symbol }}" title="Hisse merkezi"><b>{{ p.symbol }}</b></a> <a class="xs muted" href="/portfolio/trades?symbol={{ p.symbol }}" title="İşlemler">⇄</a>{% if p.asset != 'stock' %} <span class="badge">{{ p.asset }}</span>{% endif %}
+          {% if p.stale %}<span class="badge warn" title="Kapanış fiyatı yok; son işlem fiyatı kullanıldı">fiyat yok</span>{% endif %}</td>
+      <td class="num">{{ p.qty | qty }}</td>
+      <td class="num">{{ p.avg | usd2 }}</td>
+      <td class="num">{{ p.price | usd2 }}</td>
+      <td class="num {{ p.day_pct | sgn }}">{{ p.day_pct | pct }}</td>
+      <td class="num">{{ p.value | usd }}</td>
+      <td class="num {{ p.unreal | sgn }}">{{ p.unreal | susd }}</td>
+      <td class="num {{ p.unreal_pct | sgn }}">{{ p.unreal_pct | pct }}</td>
+      <td class="num">{{ '%.1f' % p.weight if p.weight is not none else '—' }}%</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}<p class="muted small" style="padding:0 12px 10px">Açık pozisyon yok. Nakit {{ a.cash | usd }}.</p>{% endif %}
+</details>
+{% endfor %}
+
+<section class="panel recent">
+  <h3 class="ph">Son 7 gün işlemler <a class="small" href="/portfolio/trades">tümü →</a></h3>
+  <div class="tiles four">
+    <div class="tile"><div class="lbl">İşlem</div><div class="val">{{ recent.n }}</div><div class="sub muted">{{ recent.buys }} alım · {{ recent.sells }} satış</div></div>
+    <div class="tile"><div class="lbl">Alım hacmi</div><div class="val pos">{{ recent.buy_amount | usd }}</div></div>
+    <div class="tile"><div class="lbl">Satış hacmi</div><div class="val neg">{{ recent.sell_amount | usd }}</div></div>
+    <div class="tile"><div class="lbl">Gerçekleşen K/Z</div><div class="val {{ recent.realized | sgn }}">{{ recent.realized | susd }}</div><div class="sub muted">satışlardan</div></div>
+  </div>
+</section>
+
+{% if warnings %}
+<details class="flash err small" {% if warnings | length <= 3 %}open{% endif %}>
+  <summary>⚠ {{ warnings | length }} veri uyarısı — çoğu, dökümün eski alımları içermemesinden olur</summary>
+  {% for w in warnings %}{{ w }}<br>{% endfor %}
+</details>
+{% endif %}
+
+<details class="explain" id="how">
+  <summary>Bu sayılar nasıl hesaplanıyor?</summary>
+  <div>
+    <p><b>Kaynak:</b> işlem defterin (elle giriş + Revolut CSV) ve Yahoo'nun günlük kapanışları. Hiçbir sayıyı yapay zekâ üretmez.</p>
+    <p><b>Ortalama maliyet:</b> alımlar maliyete eklenir; satışta satılan adet ortalama maliyetten düşülür, farkı <i>gerçekleşen K/Z</i> olur.</p>
+    <p><b>Bölünmeler:</b> eski işlemlerin adet/fiyatı, Yahoo'daki bölünme kayıtlarıyla bugünkü hisse bazına çevrilir; böylece kapanış fiyatlarıyla aynı ölçekte durur.</p>
+    <p><b>Toplam getiri</b> zaman ağırlıklıdır: para yatırma/çekme getiri sayılmaz. <b>Alt portföy getirisi</b> ise o alt portföyün tuttuğu hisselerin getirisidir (alım/satımlar akış, temettü kazanç sayılır) — nakdi hesaba katmaz.</p>
+    <p><b>Nakit:</b> alt portföy nakdi eksiye düşebilir (başka alt portföyün nakdiyle alım). Toplam nakit eksiye düşerse eksik kısım kayıtsız para yatırma varsayılır ki getiri anlamlı kalsın; bunu görüyorsan para yatırma kayıtlarını ekle.</p>
+    <p><b>Kıyas:</b> SPX = ^GSPC, NDX = ^NDX, IXIC = ^IXIC; fiyat endeksi (temettüsüz), aynı başlangıç/bitiş günleri.</p>
+  </div>
+</details>
+
+<script src="/static/lightweight-charts.js"></script>
+<script>
+const pel = document.getElementById('pchart');
+const pc = LightweightCharts.createChart(pel, {
+  height: 300, layout: { background: { color: '#161b22' }, textColor: '#c9d1d9' },
+  grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+  rightPriceScale: { borderColor: '#2a3140' }, timeScale: { borderColor: '#2a3140' },
+  localization: { priceFormatter: v => (v >= 0 ? '+' : '') + v.toFixed(1) + '%' },
+});
+const colors = { SPX: '#8b949e', NDX: '#a371f7', IXIC: '#d29922' };
+const port = pc.addAreaSeries({ lineColor: '#3fb950', topColor: 'rgba(63,185,80,.25)', bottomColor: 'rgba(63,185,80,0)', lineWidth: 2 });
+const bench = {};
+for (const k in colors) bench[k] = pc.addLineSeries({ color: colors[k], lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+async function loadP(r) {
+  const d = await (await fetch('/api/portfolio/chart?range=' + r)).json();
+  port.setData(d.portfolio);
+  for (const k in bench) bench[k].setData(d.bench[k] || []);
+  pc.timeScale().fitContent();
+}
+document.querySelectorAll('#ranges a').forEach(a => a.onclick = ev => {
+  ev.preventDefault(); document.querySelectorAll('#ranges a').forEach(x => x.classList.remove('active'));
+  a.classList.add('active'); loadP(a.dataset.r);
+});
+new ResizeObserver(() => pc.applyOptions({ width: pel.clientWidth })).observe(pel);
+loadP('ytd');
+</script>
+{% endif %}
+{% endblock %}

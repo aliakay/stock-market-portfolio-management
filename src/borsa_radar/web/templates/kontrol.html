@@ -1,0 +1,163 @@
+{% extends "base.html" %}
+{% block title %}İşlem öncesi kontrol · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% block content %}
+<style>
+.pc-form { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.pc-form label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+.pc-form input { width: 120px; }
+.pc-form input[name=symbol] { width: 110px; text-transform: uppercase; font-weight: 600; }
+.pc-side { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.pc-side label { flex-direction: row; align-items: center; gap: 0; color: var(--text); font-size: 13px; cursor: pointer; }
+.pc-side input { display: none; }
+.pc-side span { padding: 6px 12px; background: var(--panel2); }
+.pc-side input:checked + span { background: #1f6feb; color: #fff; }
+.pc-side input[value=sell]:checked + span { background: #8e1519; }
+.pc-verdict { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; margin: 14px 0; padding: 14px 16px; border-radius: 10px;
+  border: 1px solid var(--border); border-left: 5px solid var(--neu); background: var(--panel); }
+.pc-verdict.pos { border-left-color: var(--pos); } .pc-verdict.warn { border-left-color: var(--warn); } .pc-verdict.neg { border-left-color: var(--neg); }
+.pc-verdict .big { font-size: 28px; font-weight: 800; letter-spacing: .02em; min-width: 110px; }
+.pc-verdict.pos .big { color: var(--pos); } .pc-verdict.warn .big { color: var(--warn); } .pc-verdict.neg .big { color: var(--neg); }
+.pc-verdict p { margin: 0; flex: 1; min-width: 240px; font-size: 15px; color: var(--text); }
+.pc-checks { display: flex; flex-direction: column; gap: 8px; }
+.pc-check { display: grid; grid-template-columns: 170px 1fr; gap: 10px; align-items: start; }
+.pc-check .result { font-size: 14px; }
+.result.warn { border-left-color: var(--warn); color: var(--text); }
+.result.na { border-left-style: dashed; }
+.pc-check .ttl { font-weight: 600; font-size: 13.5px; padding-top: 8px; }
+.pc-check .ttl .band { margin-left: 4px; font-size: 11px; }
+.pc-src { display: block; margin-top: 4px; }
+.pc-notes li { margin: 4px 0; }
+.lvl { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 6px; }
+.lvl div { background: var(--panel2); border-radius: 6px; padding: 6px 8px; font-variant-numeric: tabular-nums; }
+.lvl .lbl { display: block; font-size: 11px; color: var(--muted); }
+@media (max-width: 700px) {
+  .pc-check { grid-template-columns: 1fr; gap: 2px; }
+  .pc-check .ttl { padding-top: 0; }
+  .pc-form label { flex: 1 1 42%; } .pc-form input, .pc-form input[name=symbol] { width: 100%; }
+  .pc-verdict .big { font-size: 24px; min-width: 0; }
+}
+</style>
+
+<div class="pf-head">
+  <div>
+    <h1>İşlem öncesi kontrol</h1>
+    <p class="lede">Alım ya da satıştan önce boyut, ağırlık, yoğunlaşma, rejim, devre kesici, plan ve bilanço kontrolü. Öneri ve kayıt aracıdır; emir vermez, işlemi engellemez.</p>
+  </div>
+  {% if r %}<div class="stamp">portföy <b>{{ r.portfolio.day|trdate or '—' }}</b> kapanışı · kontrol {{ r.today|trdate }}
+    {% for s in r.sources %}<span class="src">{{ s }}</span>{% endfor %}</div>{% endif %}
+</div>
+
+<section class="panel">
+  <form method="get" action="/portfolio/kontrol" class="pc-form">
+    <div class="pc-side" role="radiogroup" aria-label="Yön">
+      <label><input type="radio" name="side" value="buy" {{ 'checked' if form.side == 'buy' }}><span>Al</span></label>
+      <label><input type="radio" name="side" value="sell" {{ 'checked' if form.side == 'sell' }}><span>Sat</span></label>
+    </div>
+    <label>Sembol<input name="symbol" value="{{ form.symbol }}" list="pc-syms" placeholder="NVDA" required autocomplete="off"></label>
+    <datalist id="pc-syms">{% for s in held %}<option value="{{ s }}">elde</option>{% endfor %}{% for t in nav_tickers if t.symbol not in held %}<option value="{{ t.symbol }}">{% endfor %}</datalist>
+    <label>Adet<input name="qty" value="{{ form.qty }}" inputmode="decimal" placeholder="boş: öneri"></label>
+    <label>ya da tutar ($)<input name="amount" value="{{ form.amount }}" inputmode="decimal" placeholder="2000"></label>
+    <label>Fiyat ($)<input name="price" value="{{ form.price }}" inputmode="decimal" placeholder="son kapanış"></label>
+    <label>Stop ($)<input name="stop" value="{{ form.stop }}" inputmode="decimal" placeholder="setup / 2×ATR"></label>
+    <button>Kontrol et</button>
+  </form>
+</section>
+{% if err %}<div class="flash err" style="margin-top:12px">{{ err }}</div>{% endif %}
+
+{% if r %}
+<div class="pc-verdict {{ r.tone }}">
+  <div class="big">{{ r.verdict }}</div>
+  <p>{{ r.summary }}</p>
+</div>
+
+<div class="tiles">
+  <div class="tile"><div class="lbl">Fiyat</div><div class="val">{{ tn(r.price) }}$</div>
+    <div class="sub muted">{{ r.price_src }}</div></div>
+  <div class="tile"><div class="lbl">Plan</div><div class="val">{{ tn(r.qty, 2)|replace(',00', '') }} adet</div>
+    <div class="sub muted">≈ {{ tn(r.amount, 0) }}$ · {{ r.qty_src or '—' }}</div></div>
+  {% if r.side == 'buy' %}
+  <div class="tile"><div class="lbl">Önerilen en fazla</div><div class="val {{ 'neg' if r.qty and r.suggested_qty is not none and r.qty > r.suggested_qty + 1e-6 }}">{% if r.suggested_qty is not none %}{{ tn(r.suggested_qty, 2)|replace(',00', '') }} adet{% else %}<span class="muted">doğrulanamadı</span>{% endif %}</div>
+    <div class="sub muted">{% if r.suggested_risk is not none %}stopa kadar risk {{ tn(r.suggested_risk, 0) }}${% else %}risk ve %{{ tn(r.settings.max_position_pct, 0) }} ağırlık sınırı{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Risk bütçesi</div><div class="val">{{ tn(r.budget, 0) }}$</div>
+    <div class="sub muted">portföy {{ tn(r.portfolio.value, 0) }}$ × %{{ tn(r.settings.risk_per_trade_pct, 1) }}{% if r.planned_risk is not none %} · plan {{ tn(r.planned_risk, 0) }}${% endif %}</div></div>
+  <div class="tile"><div class="lbl">Stop</div><div class="val">{{ tn(r.stop) }}{% if r.stop %}${% endif %}</div>
+    <div class="sub muted">{% if r.per_share_risk %}hisse başı {{ tn(r.per_share_risk) }}$ · {% endif %}{{ r.stop_src }}</div></div>
+  {% else %}
+  <div class="tile"><div class="lbl">Tahmini gerçekleşen</div><div class="val {{ r.est_realized|sgn }}">{% if r.est_realized is not none %}{{ r.est_realized|susd }}{% else %}<span class="muted">—</span>{% endif %}</div>
+    <div class="sub muted">{{ tp(r.est_pct) }} · komisyon hariç</div></div>
+  <div class="tile"><div class="lbl">Elde</div><div class="val">{% if r.holding %}{{ tn(r.holding.qty, 2)|replace(',00', '') }}{% else %}<span class="muted">yok</span>{% endif %}</div>
+    <div class="sub muted">{% if r.holding %}ort. maliyet {{ tn(r.holding.avg) }}$ · ilk alım {{ r.holding.first_day|trdate }}{% endif %}</div></div>
+  {% endif %}
+</div>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Kontroller</h2><span class="stamp">{{ r.checks|length }} kontrol · {{ r.n_stop }} dur · {{ r.n_warn }} dikkat{% if r.n_na %} · {{ r.n_na }} doğrulanamadı{% endif %}</span></div>
+  <div class="pc-checks">
+  {% for c in r.checks %}{% set cls = {'ok': 'pos', 'warn': 'warn', 'stop': 'neg', 'na': 'na'}[c.status] %}
+    <div class="pc-check">
+      <div class="ttl">{{ c.title }} <span class="band {{ {'ok': 'pos', 'warn': 'warn', 'stop': 'neg', 'na': ''}[c.status] }}">{{ c.status_tr }}</span></div>
+      <div class="result {{ cls }}">{{ c.reason }}{% if c.link %} <a class="small" href="{{ c.link }}">Tez defteri →</a>{% endif %}
+        {% if c.source %}<span class="pc-src xs muted">kaynak: {{ c.source }}</span>{% endif %}</div>
+    </div>
+  {% endfor %}
+  </div>
+  {% if r.notes %}<ul class="pc-notes small">{% for n in r.notes %}<li>{{ n }}</li>{% endfor %}</ul>{% endif %}
+  {% if r.side == 'buy' %}
+  {{ simple("Boyut: her işlemde stopa kadar en fazla portföyün %" ~ tn(r.settings.risk_per_trade_pct, 1) ~ "'i kadar kaybetmeyi kabul edersin. Stop ne kadar uzaksa o kadar az hisse alınır. Stop girmezsen açık setup'ın stopu, o da yoksa fiyatın 2 günlük-ortalama-oynaklık (2×ATR) altı kullanılır. Ağırlık: tek hisse portföyün %" ~ tn(r.settings.max_position_pct, 0) ~ "'sini geçmesin. Yoğunlaşma: aynı sektörde ya da son 6 ayda birlikte hareket eden hisselerde toplam %40'ı geçmek, farklı isimlere rağmen tek büyük bahis demektir. Rejim tavanı: piyasa rejimine göre kuralın önerdiği en yüksek hisse oranı. Devre kesici: art arda iki zararlı kapanış ya da haftalık %5 / aylık %8 gerçekleşen zarar varsa önce durup gözden geçir. İntikam riski: zarardan hemen sonra yeni işleme atlamak. Plan: girmeden önce neden aldığını ve hangi durumda çıkacağını yaz. Bilanço: açıklama gecesi fiyat stopun altına boşluklu açılabilir.") }}
+  {% else %}
+  {{ simple("Satışta engelleyen kural yok; amaç kararın plandan mı yoksa anlık duygudan mı geldiğini görmek. Kazananı çok kısa sürede satmak ve kaybedeni hiçbir kural tetiklenmeden tutmak, bireysel yatırımcının en sık iki hatası. Tahmini K/Z ortalama maliyetten hesaplanır; komisyon ve kur farkı hariçtir.") }}
+  {% endif %}
+</section>
+
+<div class="grid" style="margin-top:14px">
+<div>
+  {% if r.side == 'buy' and r.correlations %}<section class="panel">
+    <div class="sec-head"><h2>Portföyle korelasyon</h2><span class="stamp">son {{ r.corr_days }} ortak işlem günü · günlük getiriler</span></div>
+    <div class="table-scroll"><table class="compact">
+      <tr><th>Pozisyon</th><th class="num">Korelasyon</th><th>Küme</th></tr>
+      {% for x in r.correlations[:10] %}<tr><td><a href="/h/{{ x.symbol }}">{{ x.symbol }}</a></td>
+        <td class="num {{ 'neg' if x.corr >= 0.55 }}">{{ tn(x.corr) }}</td>
+        <td class="small">{% if r.cluster and x.symbol in r.cluster.symbols %}aynı küme{% endif %}</td></tr>{% endfor %}
+    </table></div>
+    {{ simple("1'e yakın: iki hisse neredeyse hep aynı gün aynı yöne gider. 0,55 ve üstü aynı kümeye sayılır; küme ağırlığı %40'ı geçerse çeşitlendirme sanıldığından azdır.") }}
+  </section>{% endif %}
+  {% if r.recent_trips %}<section class="panel hsec">
+    <div class="sec-head"><h2>Son kapanan pozisyonlar</h2><span class="stamp"><a href="/portfolio/closed">tümü →</a></span></div>
+    <div class="table-scroll"><table class="compact">
+      <tr><th>Sembol</th><th>Açılış</th><th>Kapanış</th><th class="num">Gün</th><th class="num">Gerçekleşen</th><th class="num">%</th></tr>
+      {% for t in r.recent_trips %}<tr><td>{{ t.symbol }}</td><td class="small">{{ t.open|trdate }}</td><td class="small">{{ t.close|trdate }}</td>
+        <td class="num">{{ t.days }}</td><td class="num {{ t.realized|sgn }}">{{ t.realized|susd }}</td><td class="num {{ t.pct|sgn }}">{{ tp(t.pct) }}</td></tr>{% endfor %}
+    </table></div>
+  </section>{% endif %}
+</div>
+<aside>
+  <div class="panel">
+    <h2 style="margin-top:0"><a href="/h/{{ r.symbol }}">{{ r.symbol }}</a> bağlamı</h2>
+    <div class="evrow small">Son kapanış: <b>{{ tn(r.last_close) }}$</b> <span class="muted">({{ r.last_close_day|trdate or 'doğrulanamadı' }}, Yahoo)</span></div>
+    {% set k = r.context.karne %}
+    <div class="evrow small">Karne: {% if k %}<a href="/h/{{ r.symbol }}/karne"><b>{{ tn(k.overall, 1) }}</b></a> <span class="band {{ k.tone }}">{{ k.label }}</span> <span class="muted">({{ k.as_of|trdate }})</span>{% else %}<span class="muted">yok</span>{% endif %}</div>
+    {% if r.sector %}<div class="evrow small">Sektör: {{ r.sector }} · {{ r.industry }}</div>{% endif %}
+    {% if r.earnings %}<div class="evrow small">Sonraki bilanço: <b>{{ r.earnings.day|trdate }}</b>{% if r.earnings.time %} {{ r.earnings.time }} NY{% endif %} <span class="muted">({{ r.earnings.tdays }} işlem günü · {{ r.earnings.source }})</span></div>{% endif %}
+    {% if r.holding %}<div class="evrow small">Elde: {{ tn(r.holding.qty, 2)|replace(',00', '') }} adet · ort. {{ tn(r.holding.avg) }}$ · <span class="{{ r.holding.unreal_pct|sgn }}">{{ tp(r.holding.unreal_pct) }}</span></div>{% endif %}
+    {% if r.thesis %}<div class="evrow small">Tez ({{ r.thesis.status }}): {{ (r.thesis.text or '')[:160] }}{% if r.thesis.rules %}<br>{% for x in r.thesis.rules %}<span class="chip {{ 'neg' if x.status == 'triggered' and not x.good else 'pos' if x.status == 'triggered' else '' }}">{{ x.label }}</span> {% endfor %}{% endif %}
+      <a class="xs" href="/tez#t{{ r.thesis.id }}">aç →</a></div>
+    {% else %}<div class="evrow small">Tez: <span class="muted">yok</span> · <a href="/tez?symbol={{ r.symbol }}">tez yaz →</a></div>{% endif %}
+  </div>
+  {% set s = r.context.setup %}
+  {% if s %}<div class="panel" style="margin-top:12px">
+    <h2 style="margin-top:0">Açık setup</h2>
+    <div class="small muted" style="margin-bottom:6px">{{ s.kind }} · {{ s.day|trdate }} · {{ s.status }} · <a href="/setups">setup'lar →</a></div>
+    <div class="lvl">
+      <div><span class="lbl">Giriş</span>{{ tn(s.entry_lo) }}–{{ tn(s.entry_hi) }}</div>
+      <div><span class="lbl">Stop</span>{{ tn(s.stop) }}</div>
+      <div><span class="lbl">Hedef 1</span>{{ tn(s.t1) }}</div>
+      <div><span class="lbl">Hedef 2</span>{{ tn(s.t2) }}</div>
+    </div>
+  </div>{% endif %}
+</aside>
+</div>
+{% elif not err %}
+<div class="empty">Sembol ve yön gir; adet ya da tutar boşsa riske göre önerilen adet hesaplanır. Satışta adet boşsa pozisyonun tamamı varsayılır.</div>
+{% endif %}
+{% endblock %}

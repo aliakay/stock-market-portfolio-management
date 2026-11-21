@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Tez defteri · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% macro thesis_card(t) %}
+<section class="panel hsec thesis {{ 'attn' if t.triggered or t.review_due or t.status == 'review' }}" id="t{{ t.id }}">
+  <div class="sec-head"><h2><a href="/h/{{ t.symbol }}">{{ t.symbol }}</a>
+      <span class="band {{ 'neg' if t.status == 'review' else 'pos' if t.status == 'active' else 'acc' if t.status == 'idea' else '' }}">{{ t.status_tr }}</span>
+      {% if t.kind %}<span class="chip">{{ t.kind }}</span>{% endif %}
+      {% if t.conviction %}<span class="xs muted">inanç {{ t.conviction }}/5</span>{% endif %}</h2>
+    <span class="stamp">yazıldı {{ t.created_at[:10] }}{% if t.entry_price %} · o günkü maliyet {{ t.entry_price|usd2 }}{% endif %}
+      {% if t.status != 'closed' %} · sonraki gözden geçirme <b class="{{ 'neg' if t.review_due }}">{{ t.next_review }}</b>{% endif %}</span></div>
+  <div class="result neu"><span class="lbl">Tez</span> {{ t.thesis }}</div>
+  {% if t.catalysts %}<div class="small" style="margin:6px 0"><b>Beklenen katalizörler:</b> {{ t.catalysts }}</div>{% endif %}
+  {% if t.outcome %}<div class="small" style="margin:6px 0"><b>Sonuç:</b>
+    {% if t.outcome.realized is not none %}{{ t.outcome.realized|susd }} ({{ t.outcome.pct|pct }}, {{ t.outcome.days }} gün){% elif t.outcome.unreal is defined %}açık pozisyon {{ t.outcome.unreal|susd }} ({{ t.outcome.pct|pct }}){% endif %}
+    · <span class="muted">{{ t.outcome.source }}</span>{% if t.lessons %}<br><b>Ders:</b> {{ t.lessons }}{% endif %}</div>{% endif %}
+
+  <table class="compact" style="margin-top:8px">
+    <tr><th>Çıkış / hedef kuralı</th><th>Durum</th><th>Son değer</th><th></th></tr>
+    {% for r in t.rules %}<tr>
+      <td class="small">{{ r.label }}</td>
+      <td>{% if r.status == 'triggered' %}<span class="band {{ 'pos' if r.good else 'neg' }}">{{ 'HEDEF' if r.good else 'TETİKLENDİ' }}</span>
+          {% elif r.status == 'ok' %}<span class="band pos">sağlam</span>{% else %}<span class="band">elle bak</span>{% endif %}</td>
+      <td class="small muted">{{ r.last_value or '—' }}</td>
+      <td>{% if t.status != 'closed' %}<form method="post" action="/tez/rule/{{ r.id }}/delete" class="inline"><input type="hidden" name="tid" value="{{ t.id }}"><button class="secondary sm" title="Kuralı sil">×</button></form>{% endif %}</td>
+    </tr>{% else %}<tr><td colspan="4" class="muted small">Kural yok. Tezin neyle bozulacağını önceden yazmak, düşüşte karar vermeyi kolaylaştırır.</td></tr>{% endfor %}
+  </table>
+
+  {% if t.status != 'closed' %}
+  <div class="tez-actions">
+    <form method="post" action="/tez/{{ t.id }}/rule" class="inline"><input name="rule" placeholder="stop 95 · hedef 250 · zarar 30 · karne 40 · gelir 20 · sulandırma 5 · rejim 40 · tarih 2027-03-31 ..." style="min-width:340px" required><button class="sm">+ Kural</button></form>
+    <form method="post" action="/tez/{{ t.id }}/note" class="inline"><input name="text" placeholder="Not ekle" required style="min-width:220px"><button class="secondary sm">Not</button></form>
+  </div>
+  <details style="margin-top:8px"><summary class="small">Gözden geçir · düzenle · kapat</summary>
+    <form method="post" action="/tez/{{ t.id }}/review" class="filters" style="margin-top:8px">
+      <input name="text" placeholder="Ne gördün? (opsiyonel)" style="min-width:260px">
+      <select name="keep"><option value="1">Tez sağlam</option><option value="0">Tez zayıfladı</option></select>
+      <button class="sm">Gözden geçirildi</button>
+    </form>
+    <form method="post" action="/tez/{{ t.id }}/edit" class="stack" style="margin-top:8px">
+      <textarea name="text" rows="3">{{ t.thesis }}</textarea>
+      <div class="filters"><input name="catalysts" value="{{ t.catalysts or '' }}" placeholder="Katalizörler" style="min-width:260px">
+        <select name="kind"><option value="">tür</option>{% for k in kinds %}<option {{ 'selected' if t.kind == k }}>{{ k }}</option>{% endfor %}</select>
+        <select name="conviction"><option value="">inanç</option>{% for i in range(1, 6) %}<option value="{{ i }}" {{ 'selected' if t.conviction == i }}>{{ i }}</option>{% endfor %}</select>
+        <label class="small">her <input name="review_days" type="number" value="{{ t.review_days }}" style="width:60px"> günde bir</label>
+        <select name="status">{% for k, v in [('active','Aktif'),('idea','Fikir'),('review','Gözden geçir')] %}<option value="{{ k }}" {{ 'selected' if t.status == k }}>{{ v }}</option>{% endfor %}</select>
+        <button class="secondary sm">Kaydet</button></div>
+    </form>
+    <form method="post" action="/tez/{{ t.id }}/close" class="filters" style="margin-top:8px">
+      <input name="lessons" placeholder="Kapanış: bu işten ne öğrendim?" style="min-width:320px"><button class="sm">Tezi kapat</button>
+    </form>
+    <form method="post" action="/tez/{{ t.id }}/delete" class="inline" onsubmit="return confirm('{{ t.symbol }} tezi ve geçmişi silinsin mi?')"><button class="danger sm">Sil</button></form>
+  </details>
+  {% endif %}
+
+  {% if t.notes %}<details style="margin-top:8px" {{ 'open' if t.triggered }}><summary class="small">Zaman çizelgesi ({{ t.notes|length }})</summary>
+    {% for n in t.notes %}<div class="evrow small"><span class="muted xs">{{ n.ts|local('%d.%m.%y') }}</span>
+      {% if n.event_id %}<a href="/e/{{ n.event_id }}">{{ n.text }}</a>{% else %}{{ n.text }}{% endif %}</div>{% endfor %}
+  </details>{% endif %}
+</section>
+{% endmacro %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Tez defteri</h1>
+    <p class="lede">Her pozisyon için: neden aldım, tezi ne bozar, ne zaman yeniden bakacağım. Kurallar her gece kapanış, karne, SEC çeyrek verisi ve rejimle kontrol edilir; tetiklenen kural Telegram'a gelir.</p>
+  </div>
+  <div class="stamp"><form method="post" action="/tez/check" class="inline"><button class="secondary sm">Kuralları şimdi kontrol et</button></form></div>
+</div>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+
+<div class="tiles four">
+  <div class="tile"><div class="lbl">Tezi olan pozisyon</div><div class="val">{{ ov.positions|selectattr('thesis')|list|length }} / {{ ov.positions|length }}</div>
+    <div class="sub muted">{% if ov.missing %}eksik: {{ ov.missing|join(', ') }}{% else %}hepsi yazılmış{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Dikkat isteyen</div><div class="val {{ 'neg' if ov.attention }}">{{ ov.attention|length }}</div>
+    <div class="sub muted">tetiklenen kural veya gözden geçirme zamanı</div></div>
+  <div class="tile"><div class="lbl">Fikirler</div><div class="val">{{ ov.ideas|length }}</div><div class="sub muted">pozisyonu olmayan tezler</div></div>
+  <div class="tile"><div class="lbl">Kapanan tezler</div><div class="val">{{ ov.closed|length }}</div>
+    <div class="sub muted">{% set w = ov.closed|selectattr('outcome')|list %}{{ w|length }} sonuçlu</div></div>
+</div>
+{{ simple("Tez, bir hisseyi neden tuttuğunun kısa yazılı halidir. Çıkış kuralı ise tezin yanlış çıktığını gösterecek ölçülebilir işarettir (fiyat şu seviyenin altına kapanırsa, gelir büyümesi şuna düşerse, şu tarihe kadar beklenen olmazsa). Bunları alım anında yazmak, düşüş geldiğinde 'biraz daha bekleyeyim' tuzağına düşmemeyi sağlar. Radar kuralları her gece kontrol eder; karar yine senindir.") }}
+
+{% if ov.orphans %}<div class="flash">Pozisyonu kapanmış ama tezi açık: {% for t in ov.orphans %}<a href="#t{{ t.id }}"><b>{{ t.symbol }}</b></a>{% if not loop.last %}, {% endif %}{% endfor %} — kapatıp ders yazmak sicili besler.</div>{% endif %}
+
+<section class="panel hsec" id="yeni">
+  <div class="sec-head"><h2>Yeni tez</h2><span class="stamp">Hermes'e de söyleyebilirsin: "CBRS tezim şu… stop 95, hedef 200"</span></div>
+  <form method="post" action="/tez/add" class="stack">
+    <div class="filters">
+      <input name="symbol" placeholder="Sembol" value="{{ new_symbol }}" required autocapitalize="characters" style="width:110px">
+      <select name="kind"><option value="">tür</option>{% for k in kinds %}<option>{{ k }}</option>{% endfor %}</select>
+      <select name="conviction"><option value="">inanç 1–5</option>{% for i in range(1, 6) %}<option value="{{ i }}">{{ i }}</option>{% endfor %}</select>
+      <input name="target" placeholder="Hedef fiyat" style="width:110px">
+      <label class="small">her <input name="review_days" type="number" value="30" style="width:60px"> günde bir gözden geçir</label>
+      <select name="status"><option value="active">Pozisyon (aktif)</option><option value="idea">Fikir (henüz almadım)</option></select>
+    </div>
+    <textarea name="text" rows="3" placeholder="Neden? 2–5 cümle: şirket ne yapıyor, neyi doğru görüyorum, piyasa neyi kaçırıyor." required></textarea>
+    <input name="catalysts" placeholder="Katalizörler: ör. Q4 bilançosu, yeni ürün, sözleşme…">
+    <textarea name="rules" rows="3" placeholder="Çıkış kuralları, her satıra bir tane:
+stop 95
+zarar 30
+karne 40
+gelir 25
+tarih 2027-06-30 büyük müşteri duyurulmazsa"></textarea>
+    <div><button>Tezi kaydet</button></div>
+  </form>
+</section>
+
+{% for t in ov.attention %}{{ thesis_card(t) }}{% endfor %}
+{% for t in ov.theses if t.status != 'closed' and t not in ov.attention %}{{ thesis_card(t) }}{% endfor %}
+{% if ov.closed %}<h2 style="margin-top:20px">Kapanan tezler</h2>{% for t in ov.closed %}{{ thesis_card(t) }}{% endfor %}{% endif %}
+{% endblock %}

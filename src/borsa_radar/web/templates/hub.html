@@ -1,0 +1,274 @@
+{% extends "base.html" %}
+{% from "_macros.html" import event_card, cal_list, karar_card %}
+{% block title %}{{ h.symbol }} · Hisse Merkezi{% endblock %}
+{% macro sec_head(s) %}
+<div class="sec-head" id="{{ s.key }}">
+  <h2>{{ s.title }}</h2>
+  <span class="stamp">{% for src in s.sources %}<span class="src">{{ src }}</span>{% endfor %}</span>
+</div>
+<div class="result {{ s.tone }}"><span class="lbl">Sonuç</span> {{ s.result }}</div>
+{% if s.missing %}<div class="missing">doğrulanamadı: {{ s.missing|join(', ') }}</div>{% endif %}
+{% if s.simple %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ s.simple }}</p></details>{% endif %}
+{% endmacro %}
+{% block content %}
+{% set q = h.quote %}{% set t = h.tech or {} %}{% set S = h.sections %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">{{ h.symbol }} <span class="muted" style="font-size:15px;font-weight:400">{{ h.name }}</span></h1>
+    <div style="font-size:22px;font-weight:700">{{ tn(q.price or t.price) }}$
+      {% if q.changePercentage is not none %}<span class="{{ q.changePercentage|sgn }}" style="font-size:15px">{{ tp(q.changePercentage, 2) }}</span>{% endif %}</div>
+    <div class="stamp">{% set rb = regime_badge() %}{% if rb %}<a class="regime-chip {{ rb.tone }}" href="/piyasa" title="Piyasa rejimi · T {{ rb.day }}">Rejim: <b>{{ rb.label }}</b> {{ rb.overall|round|int }}</a>{% endif %} Rapor tarihi (T): <b>{{ h.as_of or '—' }}</b> kapanışı · oluşturuldu {{ h.built_at.strftime('%d.%m %H:%M') }}
+      {% if not h.watched %}· <form class="inline" method="post" action="/tickers/add"><input type="hidden" name="symbols" value="{{ h.symbol }}"><button class="sm secondary">İzlemeye ekle</button></form>{% else %}· <a href="#analizler">Radar gelişmeleri</a>{% endif %}
+    </div>
+  </div>
+  <a class="karne-mini {{ card.tone if card else 'neu' }}" href="/h/{{ h.symbol }}/karne">
+    {% if card %}<b>{{ card.overall|round|int }}</b><span>Karne · {{ card.label }}</span><span class="xs muted">{{ card.created_at|local('%d.%m %H:%M') }}</span>
+    {% else %}<b>?</b><span>Karne oluştur →</span>{% endif %}
+  </a>
+</div>
+{% if kc %}{{ karar_card(kc) }}{% endif %}
+{% if card and card.summary %}<p class="lede" style="margin-bottom:12px">{{ card.summary }} <a href="/h/{{ h.symbol }}/karne" class="small">Karneyi aç</a></p>{% endif %}
+
+{% for x in active_setups or [] %}<a class="flash" style="display:block" href="/setups#c{{ x.id }}">🎯 Açık setup: <b>{{ x.name_tr }}</b> ({{ x.day|trdate }}) · {{ x.status_tr }} · giriş {{ tn(x.entry_lo) }}–{{ tn(x.entry_hi) }} $, stop {{ tn(x.stop) }} $, H1 {{ tn(x.t1) }} $ · geçerlilik {{ x.valid_until|trdate }}</a>{% endfor %}
+{% if tez %}<div class="result {{ 'neg' if tez.triggered or tez.status == 'review' else 'neu' }}" style="margin-bottom:10px">
+  <span class="lbl">Tezim</span> {{ tez.thesis|truncate(220) }}
+  {% for r in tez.rules %}<span class="chip xs {{ 'neg' if r.status == 'triggered' and not r.good else 'pos' if r.status == 'triggered' else '' }}" title="{{ r.last_value or '' }}">{{ r.label }}{% if r.status == 'triggered' %} ✕{% endif %}</span>{% endfor %}
+  <a class="small" href="/tez#t{{ tez.id }}">Tez defteri →</a>{% if tez.review_due %} <b class="neg small">gözden geçirme zamanı</b>{% endif %}</div>
+{% elif position %}<div class="flash" style="margin-bottom:10px">Bu hisse portföyünde ama tezi yazılı değil. <a href="/tez?symbol={{ h.symbol }}#yeni">Neden aldığını ve çıkış kuralını yaz →</a></div>{% endif %}
+<nav class="sec-tabs">{% for k in h.order %}<a href="#{{ k }}" class="{{ S[k].tone }}">{{ S[k].title }}</a>{% endfor %}<a href="/h/{{ h.symbol }}/karne">Karne</a></nav>
+
+<div class="panel">
+  <div class="ph-row"><div class="tabs" id="ranges">{% for r,l in [('3mo','3A'),('6mo','6A'),('1y','1Y'),('2y','2Y')] %}<a href="#" data-r="{{ r }}" class="{{ 'active' if r == '6mo' }}">{{ l }}</a>{% endfor %}</div>
+    <div class="legend xs"><span><span class="sw" style="background:#58a6ff"></span>Fiyat</span><span><span class="sw" style="background:#d29922"></span>50g ort.</span><span><span class="sw" style="background:#a371f7"></span>200g ort.</span><span title="Gün başına bir işaret; sayı o günkü önem ≥3 gelişme sayısı, yön net olumlu/olumsuz. Tıklayınca en önemlisini açar.">▲▼ radar gelişmeleri (sayı = adet, tıkla)</span>
+      {% if S.buyukpara.data.opt %}<span><span class="sw" style="background:#3fb950"></span>Put duvarı</span><span><span class="sw" style="background:#f85149"></span>Call duvarı</span>{% endif %}</div></div>
+  <div id="hchart" class="pchart"></div>
+  {% if t %}<div class="chips" style="margin-top:8px">
+    <span class="chip">{{ t.trend_label }}</span>
+    <span class="chip {{ t.chg_20d|sgn }}">20 gün {{ tp(t.chg_20d) }}</span>
+    <span class="chip {{ t.chg_63d|sgn }}">3 ay {{ tp(t.chg_63d) }}</span>
+    <span class="chip {{ t.rs63_vs_spy|sgn }}">S&P'ye göre {{ tp(t.rs63_vs_spy) }}</span>
+    <span class="chip">RSI {{ tn(t.rsi14, 0) }}</span>
+    <span class="chip">ATR {{ tp(t.atr_pct, sign=False) }}</span>
+    <span class="chip">Zirveden {{ tp(t.from_hi52) }}</span>
+  </div>{% endif %}
+</div>
+
+{# ── Sayılar ── #}
+{% set s = S.sayilar %}
+<section class="panel hsec">{{ sec_head(s) }}
+  {% if s.data.mine %}<div class="tiles" style="margin-bottom:10px">{% for m in s.data.mine %}
+    <div class="tile"><div class="lbl">Pozisyonun ({{ m.sub }})</div><div class="val">{{ m.qty|qty }} adet</div><div class="sub">ort. {{ tn(m.avg) }}$ · değer {{ m.value|usd }}</div></div>
+    <div class="tile"><div class="lbl">Gerçekleşmemiş K/Z</div><div class="val {{ m.unreal|sgn }}">{{ m.unreal|susd }}</div><div class="sub {{ m.unreal_pct|sgn }}">{{ tp(m.unreal_pct) }} · ağırlık %{{ tn(m.weight, 1) }}</div></div>
+  {% endfor %}</div>{% endif %}
+  <div class="numgrid">{% for label, val, src in s.data.rows %}
+    <div class="nitem" title="{{ src }}"><span class="lbl">{{ label }}</span><b class="{{ 'missing' if val == 'doğrulanamadı' }}">{{ val }}</b></div>{% endfor %}</div>
+  {% if s.data.desc %}<details class="more"><summary>Şirket ne yapıyor?</summary><p class="small">{{ s.data.desc }}{% if s.data.desc|length >= 900 %}…{% endif %}</p></details>{% endif %}
+</section>
+
+{# ── Neden? ── #}
+{% set s = S.neden %}
+<section class="panel hsec">{{ sec_head(s) }}
+  {% if s.data.rows %}<table class="compact"><tr><th>Dönem</th><th class="num">Fiyat</th><th class="num">Fiyat Δ</th><th class="num">2Ç EPS tahmini</th><th class="num">EPS Δ</th><th class="num">İleri F/K</th><th class="num">F/K Δ</th></tr>
+  {% for r in s.data.rows %}<tr><td>Son {{ r.days }} gün <span class="xs muted">({{ r.from_day }}'den)</span></td>
+    <td class="num">{{ tn(r.p_then) }} → {{ tn(r.p_now) }}</td><td class="num {{ r.p_chg|sgn }}">{{ tp(r.p_chg) }}</td>
+    <td class="num">{{ tn(r.eps_then) }} → {{ tn(r.eps_now) }}</td><td class="num {{ r.eps_chg|sgn }}">{{ tp(r.eps_chg) }}</td>
+    <td class="num">{{ tn(r.pe_then, 1) }} → {{ tn(r.pe_now, 1) }}</td><td class="num">{{ tp(r.pe_chg) }}</td></tr>{% endfor %}</table>
+  <div class="xs muted" style="margin-top:6px">Fiyat Δ ≈ (1 + EPS Δ) × (1 + F/K Δ) − 1. EPS = bu çeyrek + gelecek çeyrek ortalama analist tahmini.</div>{% endif %}
+</section>
+
+{# ── Analizler (radar akışı) ── #}
+{% set s = S.analizler %}
+<section class="panel hsec">{{ sec_head(s) }}
+  <div class="grid">
+    <div>
+      <div class="ph-row"><div class="ph">Radar gelişmeleri (30 gün)</div>
+        <span class="small">{% for i in [1,2,3,4] %}<a href="?imp={{ i }}#analizler" class="badge {{ 'imp3' if imp == i }}">önem ≥{{ i }}</a> {% endfor %}</span></div>
+      {% for e in ev_rows %}{{ event_card(e) }}{% else %}<div class="empty">Bu filtrede gelişme yok{% if not h.watched %} — hisse izleme listesinde değil, radar haber toplamıyor{% endif %}.</div>{% endfor %}
+    </div>
+    <aside>
+      <div class="panel"><div class="ph">Bilanço tarihi</div>{{ cal_list(upcoming) }}</div>
+      <div class="panel" style="margin-top:10px"><div class="ph">Fiyat alarmları</div>
+        {% for a in price_alerts %}<div class="evrow small">{{ a.label }}{% if a.repeat %} <span class="xs muted">(tekrarlı)</span>{% endif %}
+          <form method="post" action="/alarm/{{ a.id }}/delete" class="inline"><input type="hidden" name="back" value="/h/{{ h.symbol }}"><button class="secondary sm">×</button></form></div>
+        {% else %}<div class="muted small">Alarm yok.</div>{% endfor %}
+        <form method="post" action="/alarm/add" class="filters" style="margin-top:6px"><input type="hidden" name="back" value="/h/{{ h.symbol }}">
+          <input name="text" placeholder="{{ h.symbol }} kapanış 150 altı · {{ h.symbol }} 200 üstü · {{ h.symbol }} %6 hareket" required style="min-width:100%">
+          <button class="sm">+ Alarm</button></form></div>
+      <div class="panel" style="margin-top:10px"><div class="ph">Raporlar (Hermes)</div>
+        {% for p in reports %}<div><a href="/reports/{{ h.symbol }}/{{ p.name }}">{{ p.name }}</a></div>
+        {% else %}<div class="muted small">Henüz yok. Telegram'dan iste: <code>{{ h.symbol }} için DCF modeli kur</code></div>{% endfor %}</div>
+    </aside>
+  </div>
+</section>
+
+{# ── Kazanç ── #}
+{% set s = S.kazanc %}{% set d = s.data %}
+<section class="panel hsec">{{ sec_head(s) }}
+  <div class="tabs" data-toggle="fin"><a href="#" data-k="q" class="active">Çeyreklik</a><a href="#" data-k="a">Yıllık</a></div>
+  {% for key, rows in [('q', d.quarters), ('a', d.annual)] %}
+  <div class="table-scroll" data-fin="{{ key }}" {% if key == 'a' %}hidden{% endif %}><table class="compact">
+    <tr><th>Dönem</th><th class="num">Gelir</th><th class="num">Büyüme</th><th class="num">Brüt marj</th><th class="num">Faaliyet marjı</th><th class="num">Net kâr</th><th class="num">EPS</th><th class="num">EPS büyüme</th><th class="num">Serbest nakit</th></tr>
+    {% for r in rows %}<tr><td>{{ r.period }}</td><td class="num">{{ big(r.revenue) }}</td><td class="num {{ r.rev_g|sgn }}">{{ tp(r.rev_g) }}</td>
+      <td class="num">{{ tp(r.gross_m, sign=False) }}</td><td class="num">{{ tp(r.op_m, sign=False) }}</td><td class="num">{{ big(r.net) }}</td>
+      <td class="num">{{ tn(r.eps) }}</td><td class="num {{ r.eps_g|sgn }}">{{ tp(r.eps_g) }}</td><td class="num {{ r.fcf|sgn }}">{{ big(r.fcf) }}</td></tr>
+    {% else %}<tr><td colspan="9" class="muted">doğrulanamadı</td></tr>{% endfor %}
+  </table>{% if key == 'q' %}<div class="xs muted">Büyüme: aynı çeyreğin bir yıl öncesine göre (5 çeyrek veri: sadece son çeyrekte hesaplanabilir).</div>{% endif %}</div>
+  {% endfor %}
+  <div class="grid2" style="margin-top:12px">
+    <div><div class="ph">Tahmin vs gerçekleşen (EPS)</div><table class="compact">
+      <tr><th>Çeyrek</th><th class="num">Tahmin</th><th class="num">Gerçek</th><th class="num">Sürpriz</th></tr>
+      {% for x in d.history|reverse %}<tr><td>{{ x.quarter }}</td><td class="num">{{ tn(x.est) }}</td><td class="num">{{ tn(x.actual) }}</td><td class="num {{ x.surprise|sgn }}">{{ tp(x.surprise) }}</td></tr>{% endfor %}
+    </table></div>
+    <div><div class="ph">Önümüzdeki dönem beklentileri</div><table class="compact">
+      <tr><th>Dönem</th><th class="num">EPS (ort.)</th><th class="num">Aralık</th><th class="num">Yıllık</th><th class="num">Gelir</th><th class="num">Analist</th></tr>
+      {% for p, l in [('0q','Bu çeyrek'),('+1q','Gelecek çeyrek'),('0y','Bu yıl'),('+1y','Gelecek yıl')] %}{% set e = d.est[p] %}{% set r = d.rev[p] %}
+      <tr><td>{{ l }}</td><td class="num">{{ tn(e.avg) }}</td><td class="num xs">{{ tn(e.low) }}–{{ tn(e.high) }}</td><td class="num {{ ((e.growth if e.growth is number else 0)*100)|sgn }}">{{ tp(e.growth * 100 if e.growth is number else none) }}</td><td class="num">{{ big(r.avg) }}</td><td class="num">{{ e.numberOfAnalysts or '—' }}</td></tr>{% endfor %}
+    </table>
+    {% if d.next %}<div class="small" style="margin-top:6px">Sıradaki bilanço: <b>{{ d.next.date }}</b>{% if d.next.revenueEstimated %} · gelir tahmini {{ big(d.next.revenueEstimated) }}{% endif %}</div>{% endif %}</div>
+  </div>
+  {% if d.segments or d.geo %}<div class="grid2" style="margin-top:12px">
+    {% for title, segs in [('Ürün / hizmet kırılımı', d.segments), ('Bölge kırılımı', d.geo)] %}{% if segs %}<div><div class="ph">{{ title }} ({{ segs[0].year }})</div>
+      {% for g in segs %}<div class="segrow"><span class="small">{{ g.name }}</span><div class="segbar"><div style="width:{{ g.share }}%"></div></div>
+        <span class="num small">{{ big(g.value) }}</span><span class="num xs {{ g.g|sgn }}">{{ tp(g.g) }}</span></div>{% endfor %}</div>{% endif %}{% endfor %}
+  </div>{% endif %}
+  {% if fin %}<details class="more"><summary>SEC XBRL çeyrekleri (resmi dosyalardan; hisse sulandırma dahil)</summary><div class="table-scroll"><table class="compact">
+    <tr><th>Dönem</th><th class="num">Gelir</th><th class="num">YoY</th><th class="num">Brüt marj</th><th class="num">Faaliyet kârı</th><th class="num">Net kâr</th><th class="num">EPS</th><th class="num">Nakit</th><th class="num">Hisse (M)</th><th class="num">Hisse Δ QoQ</th></tr>
+    {% for r in fin %}<tr><td>{{ r.period_end }}{% if r.fp == 'FY' %} (Q4){% endif %}</td><td class="num">{{ fmt_usd(r.revenue) }}</td><td class="num">{{ tp(r.rev_yoy) }}</td><td class="num">{{ tp(r.gross_margin, sign=False) }}</td><td class="num">{{ fmt_usd(r.op_income) }}</td><td class="num">{{ fmt_usd(r.net_income) }}</td><td class="num">{{ tn(r.eps_diluted) }}</td><td class="num">{{ fmt_usd(r.cash) }}</td><td class="num">{{ tn((r.shares_out or 0) / 1000000, 1) }}</td><td class="num {{ 'neg' if r.shares_qoq is not none and r.shares_qoq >= 2 }}">{{ tp(r.shares_qoq) }}</td></tr>{% endfor %}
+  </table></div></details>{% endif %}
+</section>
+
+{# ── Uzmanlar ── #}
+{% set s = S.uzmanlar %}{% set d = s.data %}
+<section class="panel hsec">{{ sec_head(s) }}
+  {% if d.ptc.targetLow and d.ptc.targetHigh and q.price %}
+  {% set lo = [d.ptc.targetLow, q.price]|min * 0.95 %}{% set hi = [d.ptc.targetHigh, q.price]|max * 1.05 %}
+  <div class="tgt">
+    <div class="tgt-band" style="left:{{ (d.ptc.targetLow - lo) / (hi - lo) * 100 }}%;width:{{ (d.ptc.targetHigh - d.ptc.targetLow) / (hi - lo) * 100 }}%"></div>
+    <div class="tgt-mark med" style="left:{{ (d.ptc.targetMedian - lo) / (hi - lo) * 100 }}%"><span>medyan {{ tn(d.ptc.targetMedian) }}</span></div>
+    <div class="tgt-mark px" style="left:{{ (q.price - lo) / (hi - lo) * 100 }}%"><span>fiyat {{ tn(q.price) }}</span></div>
+    <div class="tgt-end l">{{ tn(d.ptc.targetLow) }}</div><div class="tgt-end r">{{ tn(d.ptc.targetHigh) }}</div>
+  </div>{% endif %}
+  {% if d.total %}<div class="gcbar">{% for k, l, c in [('strongBuy','Güçlü al','#2ea043'),('buy','Al','#3fb950'),('hold','Tut','#8b949e'),('sell','Sat','#f85149'),('strongSell','Güçlü sat','#da3633')] %}{% set n = d.gc[k] or 0 %}{% if n %}<div style="flex:{{ n }};background:{{ c }}" title="{{ l }}: {{ n }}">{{ l }} {{ n }}</div>{% endif %}{% endfor %}</div>{% endif %}
+  <div class="grid2" style="margin-top:12px">
+    <div><div class="ph">Yıllık tahmin yolu</div><table class="compact">
+      <tr><th>Yıl</th><th class="num">Gelir</th><th class="num">Δ</th><th class="num">EPS</th><th class="num">Δ</th><th class="num">Analist</th></tr>
+      {% for e in d.est %}<tr><td>{{ e.year }}</td><td class="num">{{ big(e.rev) }}</td><td class="num {{ e.rev_g|sgn }}">{{ tp(e.rev_g) }}</td><td class="num">{{ tn(e.eps) }}</td><td class="num {{ e.eps_g|sgn }}">{{ tp(e.eps_g) }}</td><td class="num">{{ e.n or '—' }}</td></tr>{% endfor %}
+    </table></div>
+    <div><div class="ph">EPS tahmin revizyonları</div><table class="compact">
+      <tr><th>Dönem</th><th class="num">90 gün önce</th><th class="num">30 gün önce</th><th class="num">7 gün önce</th><th class="num">Şimdi</th><th class="num">30g Δ</th></tr>
+      {% for r in d.revisions %}<tr><td>{{ {'0q':'Bu çeyrek','+1q':'Gelecek çeyrek','0y':'Bu yıl','+1y':'Gelecek yıl'}.get(r.period, r.period) }}</td><td class="num">{{ tn(r.d90) }}</td><td class="num">{{ tn(r.d30) }}</td><td class="num">{{ tn(r.d7) }}</td><td class="num"><b>{{ tn(r.now) }}</b></td><td class="num {{ r.chg30|sgn }}">{{ tp(r.chg30) }}</td></tr>{% endfor %}
+    </table></div>
+  </div>
+  {% if d.grades %}<details class="more" open><summary>Son not değişiklikleri (90 gün)</summary>
+    {% for day, gs in d.grades %}<div class="evrow"><span class="xs muted">{{ day }}</span> {% for g in gs %}<span class="chip {{ 'pos' if g.action == 'upgrade' else 'neg' if g.action == 'downgrade' else '' }}">{{ g.gradingCompany }}: {% if g.previousGrade and g.previousGrade != g.newGrade %}{{ g.previousGrade }} → {% endif %}{{ g.newGrade }}</span> {% endfor %}</div>{% endfor %}
+  </details>{% endif %}
+</section>
+
+{# ── Yöneticiler ── #}
+{% set s = S.yoneticiler %}{% set d = s.data %}
+<section class="panel hsec">{{ sec_head(s) }}
+  {% if d.tx %}<div class="table-scroll"><table class="compact">
+    <tr><th>Tarih</th><th>Kişi</th><th>Görev</th><th>İşlem</th><th class="num">Adet</th><th class="num">Tutar</th></tr>
+    {% for x in d.tx[:25] %}<tr><td>{{ x.date }}</td><td>{{ x.who }}</td><td class="small muted">{{ x.role }}</td>
+      <td class="{{ 'pos' if x.kind == 'al' else 'neg' if x.kind == 'sat' else 'muted' }}" title="{{ x.text }}">{{ x.kind }}</td>
+      <td class="num">{{ tn(x.shares, 0) }}</td><td class="num">{{ big(x.value) if x.value else '—' }}</td></tr>{% endfor %}
+  </table></div>{% endif %}
+  {% if d.form4 %}<div class="ph" style="margin-top:10px">SEC Form 4 (radar)</div>{% for e in d.form4 %}<div class="evrow"><span class="xs muted">{{ e.published_at|local('%d.%m.%y') }}</span> {{ e.direction|dir_icon }} <a href="/e/{{ e.id }}">{{ e.title }}</a></div>{% endfor %}{% endif %}
+  {% if d.execs %}<details class="more"><summary>Yönetim kadrosu</summary><div class="chips">{% for e in d.execs %}<span class="chip">{{ e.name }} · {{ e.title }}</span>{% endfor %}</div></details>{% endif %}
+</section>
+
+{# ── Büyük para ── #}
+{% set s = S.buyukpara %}{% set d = s.data %}{% set o = d.opt %}
+<section class="panel hsec">{{ sec_head(s) }}
+  {% if o %}
+  <div class="tiles">
+    <div class="tile"><div class="lbl">Call duvarı</div><div class="val neg">{{ tn(o.call_wall, 1) }}</div><div class="sub muted">en çok call OI (fiyat üstü)</div></div>
+    <div class="tile"><div class="lbl">Put duvarı</div><div class="val pos">{{ tn(o.put_wall, 1) }}</div><div class="sub muted">en çok put OI (fiyat altı)</div></div>
+    <div class="tile"><div class="lbl">Max pain</div><div class="val">{{ tn(o.max_pain, 1) }}</div><div class="sub muted">{{ o.max_pain_expiry }} vadesi</div></div>
+    <div class="tile"><div class="lbl">Gamma</div><div class="val {{ 'pos' if o.gex > 0 else 'neg' }}">{{ o.gamma_sign }}</div><div class="sub muted">dönüş ≈ {{ tn(o.gamma_flip, 0) if o.gamma_flip else '—' }}</div></div>
+    <div class="tile"><div class="lbl">Beklenen hareket</div><div class="val">±{{ tn(o.exp_move) }}</div><div class="sub muted">%{{ tn(o.exp_move_pct, 1) }} · {{ o.exp_move_expiry }}</div></div>
+    <div class="tile"><div class="lbl">Put/Call (OI · hacim)</div><div class="val">{{ tn(o.pc_oi) }}</div><div class="sub muted">hacim {{ tn(o.pc_vol) }}</div></div>
+    <div class="tile"><div class="lbl">ATM örtük oynaklık</div><div class="val">%{{ tn((o.atm_iv or 0) * 100, 1) }}</div>
+      <div class="sub muted">{% if d.hv20 %}20g gerçekleşen %{{ tn(d.hv20 * 100, 1) }}{% endif %}{% if o.iv_rank is not none %} · IV rank {{ tn(o.iv_rank, 0) }}{% else %} · IV rank: {{ o.iv_hist_n }}/20 gün birikti{% endif %}</div></div>
+    {% if d.range_pos is not none %}<div class="tile"><div class="lbl">Duvarlar arası konum</div><div class="val">%{{ tn(d.range_pos, 0) }}</div><div class="sub muted">0 = put duvarı, 100 = call duvarı</div></div>{% endif %}
+  </div>
+  <div class="ph" style="margin-top:12px">Açık pozisyon profili (±%20, {{ o.expiries|length }} vade, ≤60 gün)</div>
+  {% set mx = (o.profile|map(attribute='call_oi')|list + o.profile|map(attribute='put_oi')|list + [1])|max %}
+  <div class="oiprof">{% for p in o.profile %}<div class="oirow {{ 'spot' if loop.index0 < o.profile|length - 1 and p.strike <= o.spot < o.profile[loop.index0 + 1].strike }}">
+    <div class="oiput"><div style="width:{{ p.put_oi / mx * 100 }}%"></div></div><span class="oik">{{ tn(p.strike, 1) }}</span><div class="oicall"><div style="width:{{ p.call_oi / mx * 100 }}%"></div></div></div>{% endfor %}</div>
+  <div class="xs muted">Sol: put OI · sağ: call OI · vurgulu satır: güncel fiyat ({{ tn(o.spot) }})</div>
+  {% if o.unusual %}<div class="ph" style="margin-top:12px">Olağandışı akış (hacim &gt; 1,5 × açık pozisyon)</div><table class="compact">
+    <tr><th>Vade</th><th>Tür</th><th class="num">Kullanım</th><th class="num">Hacim</th><th class="num">OI</th><th class="num">Prim (yakl.)</th></tr>
+    {% for u in o.unusual %}<tr><td>{{ u.expiry }}</td><td class="{{ 'pos' if u.type == 'CALL' else 'neg' }}">{{ u.type }}</td><td class="num">{{ tn(u.strike, 1) }}</td><td class="num">{{ tn(u.vol, 0) }}</td><td class="num">{{ tn(u.oi, 0) }}</td><td class="num">{{ big(u.premium) }}</td></tr>{% endfor %}
+  </table>{% endif %}
+  {% endif %}
+  <div class="grid2" style="margin-top:12px">
+    <div><div class="ph">Sahiplik</div><div class="numgrid">
+      <div class="nitem"><span class="lbl">Kurumsal</span><b>{{ tp(d.inst * 100, sign=False) if d.inst else '—' }}</b></div>
+      <div class="nitem"><span class="lbl">İçeriden</span><b>{{ tp(d.ins * 100, 2, sign=False) if d.ins else '—' }}</b></div>
+      <div class="nitem"><span class="lbl">Açığa satış / halka açık</span><b>{{ tp(d.short_float * 100, sign=False) if d.short_float else '—' }}</b></div></div></div>
+    <div><div class="ph">Açığa satış (FINRA, 2 haftalık)</div>{% if d.si %}<table class="compact">
+      <tr><th>Tarih</th><th class="num">Miktar</th><th class="num">Δ</th><th class="num">Kapatma (gün)</th></tr>
+      {% for r in d.si|reverse %}<tr><td>{{ r.settlement_date }}</td><td class="num">{{ big(r.short_qty)|replace('$', '') }}</td><td class="num {{ (r.change_pct or 0)|sgn }}">{{ tp(r.change_pct) }}</td><td class="num">{{ tn(r.days_to_cover, 1) }}</td></tr>{% endfor %}
+    </table>{% else %}<div class="muted small">Hisse izleme listesinde değilse FINRA verisi toplanmaz.</div>{% endif %}</div>
+  </div>
+  {% if h.watched %}<div class="grid2" style="margin-top:12px">
+    <div><div class="ph">Günlük açığa satış hacmi oranı (FINRA, %)</div><div id="short-chart" class="mini-chart"></div></div>
+    <div><div class="ph">Reddit ilgisi (ApeWisdom, 30 gün)</div><div id="social-bars" class="social-bars"></div><div id="social-empty" class="muted small" hidden>Son 30 günde ilk 600'de değil</div></div>
+  </div>{% endif %}
+</section>
+
+<details class="explain"><summary>Bu sayfa nasıl hesaplanıyor?</summary>
+  <p>Her sayı sunucuda hesaplanır; her bölümün sağ üstünde kaynak ve alınma zamanı yazar. Bir veri alınamazsa tahmin edilmez, “doğrulanamadı” yazılır. Fiyat ve teknik göstergeler T = {{ h.as_of }} kapanışına göredir.</p>
+  <p>Kaynaklar: FMP (bilanço, oranlar, analist hedefleri), Yahoo (fiyat, tahmin geçmişi, içeriden işlemler, opsiyon zinciri), SEC ve FINRA (radarın kendi topladığı). Opsiyon verisi ücretsiz ve gecikmelidir; duvar/gamma hesapları yaklaşıktır.</p>
+</details>
+
+<script src="/static/lightweight-charts.js"></script>
+<script>
+(() => {
+  const el = document.getElementById('hchart');
+  const ch = LightweightCharts.createChart(el, { height: 300, layout: { background: { color: '#161b22' }, textColor: '#c9d1d9' },
+    grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } }, rightPriceScale: { borderColor: '#2a3140' }, timeScale: { borderColor: '#2a3140' } });
+  const px = ch.addCandlestickSeries({ upColor: '#3fb950', downColor: '#f85149', borderVisible: false, wickUpColor: '#3fb950', wickDownColor: '#f85149' });
+  const m50 = ch.addLineSeries({ color: '#d29922', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  const m200 = ch.addLineSeries({ color: '#a371f7', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
+  {% if o %}
+  px.createPriceLine({ price: {{ o.put_wall or 0 }}, color: '#3fb950', lineStyle: 2, lineWidth: 1, title: 'put duvarı' });
+  px.createPriceLine({ price: {{ o.call_wall or 0 }}, color: '#f85149', lineStyle: 2, lineWidth: 1, title: 'call duvarı' });
+  {% endif %}
+  async function load(r) {
+    const d = await (await fetch('/api/hub/{{ h.symbol }}/bars?range=' + r)).json();
+    px.setData(d.bars); m50.setData(d.sma50); m200.setData(d.sma200);
+    markerIds = {};
+    px.setMarkers((d.markers || []).map(m => { markerIds[m.time] = m.id; const p = m.direction > 0, n = m.direction < 0;
+      return { time: m.time, position: n ? 'aboveBar' : 'belowBar', color: p ? '#3fb950' : n ? '#f85149' : '#8b949e',
+               shape: p ? 'arrowUp' : n ? 'arrowDown' : 'circle', text: m.count > 1 ? String(m.count) : (m.type === 'rating' ? 'A' : '') }; }));
+    ch.timeScale().fitContent();
+  }
+  let markerIds = {};
+  ch.subscribeClick(p => { if (p.time && markerIds[p.time]) location.href = '/e/' + markerIds[p.time]; });
+  document.querySelectorAll('#ranges a').forEach(a => a.onclick = e => { e.preventDefault();
+    document.querySelectorAll('#ranges a').forEach(x => x.classList.remove('active')); a.classList.add('active'); load(a.dataset.r); });
+  load('6mo');
+  new ResizeObserver(() => ch.applyOptions({ width: el.clientWidth })).observe(el);
+  document.querySelectorAll('[data-toggle=fin] a').forEach(a => a.onclick = e => { e.preventDefault();
+    a.parentNode.querySelectorAll('a').forEach(x => x.classList.toggle('active', x === a));
+    document.querySelectorAll('[data-fin]').forEach(t => t.hidden = t.dataset.fin !== a.dataset.k); });
+})();
+{% if h.watched %}
+(async () => {
+  const data = await (await fetch('/api/positioning/{{ h.symbol }}')).json();
+  const se = document.getElementById('short-chart');
+  const sc = LightweightCharts.createChart(se, { height: 180, layout: { background: { color: '#161b22' }, textColor: '#c9d1d9' },
+    grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } }, rightPriceScale: { borderColor: '#2a3140' }, timeScale: { borderColor: '#2a3140' } });
+  sc.addLineSeries({ color: '#58a6ff', lineWidth: 2 }).setData(data.short_volume.map(x => ({ time: x.day, value: (x.ratio || 0) * 100 })));
+  sc.timeScale().fitContent();
+  new ResizeObserver(() => sc.applyOptions({ width: se.clientWidth })).observe(se);
+  const vals = data.social || [], bars = document.getElementById('social-bars');
+  if (!vals.length) document.getElementById('social-empty').hidden = false;
+  else { const max = Math.max(...vals.map(x => x.mentions), 1);
+    bars.innerHTML = vals.map(x => `<div title="${x.day}: ${x.mentions}" style="height:${Math.max(3, x.mentions / max * 100)}%"></div>`).join(''); }
+})();
+{% endif %}
+</script>
+{% endblock %}

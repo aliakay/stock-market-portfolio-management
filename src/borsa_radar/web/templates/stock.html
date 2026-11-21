@@ -1,0 +1,124 @@
+{% extends "base.html" %}
+{% from "_macros.html" import event_card, cal_list %}
+{% block title %}{{ t.symbol }} · Borsa Radar{% endblock %}
+{% block content %}
+<div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px">
+  <div>
+    <h1 style="margin-bottom:0">{{ t.symbol }} <span class="muted" style="font-size:15px;font-weight:400">{{ t.name }}</span> <a class="btn sm secondary" href="/h/{{ t.symbol }}">Hisse merkezi & karne →</a></h1>
+    {% if q.price %}<div style="font-size:20px">{{ q.price|money }}$
+      {% if q.change_pct is not none %}<span class="{{ 'pos' if q.change_pct > 0 else 'neg' }}">{{ q.change_pct|pct }}</span>{% endif %}</div>{% endif %}
+  </div>
+  <div class="tabs" id="ranges">
+    {% for r in ['5d','1mo','3mo','6mo','1y','2y'] %}<a href="#" data-r="{{ r }}" class="{{ 'active' if r == '3mo' }}">{{ r }}</a>{% endfor %}
+  </div>
+</div>
+<div class="panel" style="margin-top:8px"><div id="chart"></div>
+  <div class="muted" style="font-size:12px">İşaretler: önem ≥3 gelişmeler (🟢 olumlu ▲, 🔴 olumsuz ▼, ⚪ nötr ●). Tıklayınca detaya gider.</div>
+</div>
+
+<section class="panel fundamentals"><h2 style="margin-top:0">Finansallar (SEC XBRL)</h2><div class="table-scroll"><table>
+<tr><th>Dönem</th><th>Gelir</th><th>YoY</th><th>Brüt marj</th><th>Faaliyet kârı</th><th>Net kâr</th><th>EPS</th><th>Nakit</th><th>Hisse (M)</th><th>Hisse Δ QoQ</th></tr>
+{% for r in fin %}<tr><td>{{ r.period_end }}{% if r.fp == 'FY' %} (Q4){% endif %}</td><td>{{ fmt_usd(r.revenue) }}</td><td>{{ r.rev_yoy|pct }}</td><td>{{ '—' if r.gross_margin is none else '%.1f%%'|format(r.gross_margin) }}</td><td>{{ fmt_usd(r.op_income) }}</td><td>{{ fmt_usd(r.net_income) }}</td><td>{{ r.eps_diluted|money }}</td><td>{{ fmt_usd(r.cash) }}</td><td>{{ '%.1f'|format((r.shares_out or 0)/1000000) }}</td><td class="{{ 'neg' if r.shares_qoq is not none and r.shares_qoq >= 2 else '' }}">{{ r.shares_qoq|pct }}</td></tr>{% else %}<tr><td colspan="10" class="muted">XBRL verisi yok</td></tr>{% endfor %}
+</table></div></section>
+<div class="position-grid">
+ <section class="panel"><h2 style="margin-top:0">Açığa satış (FINRA)</h2><div id="short-chart" class="mini-chart"></div><table><tr><th>Rapor tarihi</th><th class="num">Short interest</th><th class="num">Δ</th><th class="num">Kapatma</th></tr><tbody id="si-rows"></tbody></table></section>
+ <section class="panel"><h2 style="margin-top:0">Reddit ilgisi</h2><div id="social-bars" class="social-bars"></div><div id="social-empty" class="muted" hidden>Son 30 günde top-600'de değil</div></section>
+</div>
+
+<div class="grid" style="margin-top:12px">
+  <section>
+    <h2>Gelişmeler (30 gün)
+      <span style="text-transform:none;font-size:12px">
+        {% for i in [1,2,3,4] %}<a href="?imp={{ i }}" class="badge {{ 'imp3' if imp == i }}">≥{{ i }}</a> {% endfor %}
+      </span></h2>
+    {% for e in rows %}{{ event_card(e) }}{% else %}<div class="empty">Kayıt yok.</div>{% endfor %}
+  </section>
+  <aside>
+    <div class="panel">
+      <h2 style="margin-top:0">Analist hedef fiyatı</h2>
+      {% if pts %}
+      <div class="kv" style="grid-template-columns:90px 1fr">
+        <span class="muted">Ortalama</span><span>{{ pts.get('mean')|money }}$</span>
+        <span class="muted">Medyan</span><span>{{ pts.get('median')|money }}$</span>
+        <span class="muted">Yüksek</span><span>{{ pts.get('high')|money }}$</span>
+        <span class="muted">Düşük</span><span>{{ pts.get('low')|money }}$</span>
+        {% if q.price and pts.get('mean') %}<span class="muted">Potansiyel</span>
+          <span class="{{ 'pos' if pts.mean > q.price else 'neg' }}">{{ ((pts.mean / q.price - 1) * 100)|pct }}</span>{% endif %}
+      </div>
+      {% else %}<div class="muted">Veri yok</div>{% endif %}
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2 style="margin-top:0">Bilanço tarihi</h2>
+      {{ cal_list(upcoming) }}
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2 style="margin-top:0">Analist notları</h2>
+      <table>
+        {% for r in ratings %}{% set x = r.extra|loads({}) %}
+        <tr title="{{ r.title }}">
+          <td class="muted" style="white-space:nowrap">{{ r.published_at|local('%d.%m') }}</td>
+          <td>{{ r.direction|dir_icon }} {{ x.firm }}<br><span class="muted" style="font-size:12px">
+            {{ x.action }} {{ x.to_grade }}{% if x.pt_new %} · {{ x.pt_new|int }}${% if x.pt_change_pct %} ({{ x.pt_change_pct|pct }}){% endif %}{% endif %}</span></td>
+        </tr>
+        {% else %}<tr><td class="muted">Kayıt yok</td></tr>{% endfor %}
+      </table>
+    </div>
+    <div class="panel" style="margin-top:12px">
+      <h2 style="margin-top:0">Raporlar (Hermes)</h2>
+      {% for p in reports %}<div><a href="/reports/{{ t.symbol }}/{{ p.name }}">{{ p.name }}</a></div>
+      {% else %}<div class="muted" style="font-size:13px">Henüz yok. Telegram'dan iste: <code>{{ t.symbol }} için DCF modeli kur</code></div>{% endfor %}
+    </div>
+  </aside>
+</div>
+
+<script src="/static/lightweight-charts.js"></script>
+<script>
+const el = document.getElementById('chart');
+const chart = LightweightCharts.createChart(el, {
+  layout: { background: { color: '#161b22' }, textColor: '#c9d1d9' },
+  grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } },
+  timeScale: { timeVisible: true, borderColor: '#2a3140' }, rightPriceScale: { borderColor: '#2a3140' },
+  localization: { timeFormatter: t => new Date(t * 1000).toLocaleString('tr-TR', { timeZone: 'Europe/Berlin' }) },
+});
+const series = chart.addCandlestickSeries({ upColor: '#3fb950', downColor: '#f85149', wickUpColor: '#3fb950', wickDownColor: '#f85149', borderVisible: false });
+let markerIds = {};
+async function load(range) {
+  const r = await fetch(`/api/chart/{{ t.symbol }}?range=${range}`);
+  const d = await r.json();
+  if (!d.candles) return;
+  series.setData(d.candles);
+  const times = d.candles.map(c => c.time);
+  markerIds = {};
+  const ms = d.markers.map(m => {
+    // snap to the candle at/after the event
+    let t = times.find(x => x >= m.time) ?? times[times.length - 1];
+    markerIds[t] = m.id;
+    const pos = m.direction > 0, neg = m.direction < 0;
+    return { time: t, position: neg ? 'aboveBar' : 'belowBar', color: pos ? '#3fb950' : neg ? '#f85149' : '#8b949e',
+             shape: pos ? 'arrowUp' : neg ? 'arrowDown' : 'circle', text: m.type === 'rating' ? 'A' : String(m.importance) };
+  }).sort((a, b) => a.time - b.time);
+  series.setMarkers(ms);
+  chart.timeScale().fitContent();
+}
+chart.subscribeClick(p => { if (p.time && markerIds[p.time]) location.href = '/e/' + markerIds[p.time]; });
+document.querySelectorAll('#ranges a').forEach(a => a.onclick = ev => {
+  ev.preventDefault(); document.querySelectorAll('#ranges a').forEach(x => x.classList.remove('active'));
+  a.classList.add('active'); load(a.dataset.r);
+});
+new ResizeObserver(() => chart.applyOptions({ width: el.clientWidth })).observe(el);
+load('3mo');
+
+async function loadPositioning() {
+ const data = await (await fetch('/api/positioning/{{ t.symbol }}')).json();
+ const se = document.getElementById('short-chart');
+ const sc = LightweightCharts.createChart(se, {height:180, layout:{background:{color:'#161b22'},textColor:'#c9d1d9'}, grid:{vertLines:{color:'#21262d'},horzLines:{color:'#21262d'}}, rightPriceScale:{borderColor:'#2a3140'}, timeScale:{borderColor:'#2a3140'}});
+ const line = sc.addLineSeries({color:'#58a6ff',lineWidth:2});
+ line.setData(data.short_volume.map(x=>({time:x.day,value:(x.ratio||0)*100}))); sc.timeScale().fitContent();
+ new ResizeObserver(()=>sc.applyOptions({width:se.clientWidth})).observe(se);
+ document.getElementById('si-rows').innerHTML = data.short_interest.slice(-6).reverse().map(x=>`<tr><td>${x.settlement_date}</td><td class="num">${((x.short_qty||0)/1e6).toFixed(1)}M</td><td class="num">${x.change_pct==null?'—':Number(x.change_pct).toFixed(1)+'%'}</td><td class="num">${x.days_to_cover??'—'}</td></tr>`).join('');
+ const vals=data.social||[], bars=document.getElementById('social-bars');
+ if(!vals.length){document.getElementById('social-empty').hidden=false;} else {const max=Math.max(...vals.map(x=>x.mentions),1);bars.innerHTML=vals.map(x=>`<div title="${x.day}: ${x.mentions}" style="height:${Math.max(3,x.mentions/max*100)}%"></div>`).join('');}
+}
+loadPositioning();
+</script>
+{% endblock %}

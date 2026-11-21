@@ -1,0 +1,17 @@
+# systemd unit (optional): copy to /etc/systemd/system/stock-market-portfolio-management.service,
+# replace YOUR_USER and the paths, then: sudo systemctl daemon-reload && sudo systemctl enable --now stock-market-portfolio-management
+[Unit]
+Description=Stock market portfolio management (web UI :8500 + scheduled jobs)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=YOUR_USER
+WorkingDirectory=/home/YOUR_USER/stock-market-portfolio-management
+ExecStart=/home/YOUR_USER/stock-market-portfolio-management/.venv/bin/borsa-radar serve
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

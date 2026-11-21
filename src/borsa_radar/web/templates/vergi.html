@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Vergi · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% macro eur(v, sign=False) %}{% if v is not none and v|abs < 0.005 %}{% set v = 0.0 %}{% endif %}{% if v is none %}<span class="muted">doğrulanamadı</span>{% else %}{{ ('+' if sign and v > 0.005 else '') ~ tn(v, 2) ~ ' €' }}{% endif %}{% endmacro %}
+{% block content %}
+<style>
+  .vg-disc { border-left: 3px solid var(--warn); background: #d299220f; padding: 9px 13px; border-radius: 0 8px 8px 0; font-size: 13.5px; margin-bottom: 12px; }
+  .vg-disc b { color: var(--warn); }
+  .vg-bar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 0 0 12px; }
+  .vg-bar .tabs { margin: 0; flex-wrap: wrap; }
+  .vg-bar form { margin: 0; }
+  .vg-steps td:first-child { width: 62%; }
+  .vg-steps tr.sum td { border-top: 1px solid var(--border); font-weight: 700; }
+  .vg-steps tr.sub td:first-child { padding-left: 18px; color: var(--muted); }
+  .vg-map td.f { font-size: 12.5px; }
+  .nw, .vg-steps td.num { white-space: nowrap; }
+  @media (max-width: 600px) { .vg-steps td:first-child { width: auto; } }
+  .vg-pot { font-size: 11px; padding: 1px 7px; border-radius: 9px; border: 1px solid var(--border); white-space: nowrap; }
+  .vg-pot.aktien { color: #58a6ff; border-color: #58a6ff55; } .vg-pot.fonds { color: #a371f7; border-color: #a371f755; }
+  .vg-pot.krypto { color: var(--warn); border-color: #6b4e00; } .vg-pot.krypto_frei { color: var(--pos); border-color: #2ea04355; }
+  .vg-tile-note { font-size: 11px; }
+  .vg-issues div { margin-bottom: 6px; }
+  .vg-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  @media (max-width: 900px) { .vg-cols { grid-template-columns: 1fr; } }
+  .vg-sales td, .vg-sales th { white-space: nowrap; }
+  ul.vg-notes { margin: 6px 0 0; padding-left: 18px; font-size: 13px; color: #c9d1d9; }
+  ul.vg-notes li { margin-bottom: 4px; }
+</style>
+
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Vergi tahmini · Almanya</h1>
+    <p class="lede">{% if r.empty %}{{ r.year }} için işlem yok.{% else %}{{ r.summary }}{% endif %}</p>
+  </div>
+  <div class="stamp">FIFO · EUR ·
+    {% if r.fx.ecb_last %}<span class="src">ECB referans kuru · {{ r.fx.ecb_last }}</span>{% else %}<span class="src">ECB kuru: doğrulanamadı</span>{% endif %}
+    {% if 'Yahoo' in r.fx_used %}<span class="src">Yahoo EURUSD=X yedek</span>{% endif %}
+    <span class="src">işlemler: Revolut ledger</span></div>
+</div>
+
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+<div class="vg-disc"><b>Vergi danışmanlığı değildir.</b> Bu sayfa beyannameyi hazırlamak için bir tahmindir; kesin tutarlar ve satır
+  numaraları için resmi Anlage KAP / KAP-INV / SO talimatlarına bak ya da bir Steuerberater'a danış. Revolut Almanya'da vergi kesmez; bu gelirler
+  Anlage KAP ile kendin beyan edilir. Kilise vergisi (Kirchensteuer) hesaba katılmadı; bekâr kişi için Sparer-Pauschbetrag
+  {{ tn(r.rates.pauschbetrag, 0) }} € varsayıldı.</div>
+
+<div class="vg-bar">
+  <div class="tabs">{% for y in r.years|reverse %}<a href="/portfolio/vergi?year={{ y }}" class="{{ 'active' if y == r.year }}">{{ y }}</a>{% endfor %}</div>
+  {% if not r.empty %}<a class="btn secondary sm" href="/portfolio/vergi.csv?year={{ r.year }}">CSV indir</a>{% endif %}
+  <form method="post" action="/portfolio/vergi/fx-refresh?year={{ r.year }}"><button class="secondary sm" title="ECB referans kurlarını yeniden indir">Kurları güncelle</button></form>
+  {% if r.running %}<span class="chip warn">{{ r.year }} bitmedi · ara tahmin</span>{% endif %}
+</div>
+
+{% if r.empty %}<div class="empty">Bu yıl için satış, temettü ya da faiz kaydı yok.</div>{% else %}
+{% set st = r.steps %}{% set p = r.pots %}
+
+<div class="tiles">
+  <div class="tile"><div class="lbl">Hisse potu (Aktien)</div><div class="val {{ p.aktien.net|sgn }}">{{ eur(p.aktien.net, true) }}</div>
+    <div class="sub muted">kâr {{ eur(p.aktien.gains) }} · zarar {{ eur(p.aktien.losses) }}</div></div>
+  <div class="tile"><div class="lbl">Diğer (sonstige)</div><div class="val {{ st.other_total|sgn }}">{{ eur(st.other_total, true) }}</div>
+    <div class="sub muted">temettü, faiz, opsiyon, kurumsal işlem{% if p.fonds.n %}, ETF{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Temettü (brüt)</div><div class="val">{{ eur(r.div.gross) }}</div>
+    <div class="sub muted">net {{ eur(r.div.net) }} · stopaj {{ eur(r.div.wht) }}{% if r.div.assumed %} <span class="vg-tile-note">tahmini</span>{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Vergiye tabi</div><div class="val">{{ eur(st.taxable) }}</div>
+    <div class="sub muted">Pauschbetrag {{ eur(st.pauschbetrag) }} / {{ tn(st.pauschbetrag_max, 0) }} € kullanıldı</div></div>
+  <div class="tile"><div class="lbl">Tahmini vergi</div><div class="val {{ 'neg' if st.tax > 0.005 }}">{{ eur(st.tax) }}</div>
+    <div class="sub muted">%25 + %5,5 Soli = %26,375 · kilise vergisi yok</div></div>
+  <div class="tile"><div class="lbl">Devreden zarar</div><div class="val">{{ eur(st.carry_s_out + st.carry_o_out) }}</div>
+    <div class="sub muted">hisse {{ eur(st.carry_s_out) }} · diğer {{ eur(st.carry_o_out) }}</div></div>
+</div>
+{{ simple("Almanya'da hisse satış kârı, temettü ve faiz aynı sepette %25 (artı bunun %5,5'i kadar dayanışma vergisi) ile vergilenir. Yılda ilk 1.000 € vergisizdir (Sparer-Pauschbetrag). Hisse satış zararı yalnızca hisse satış kârından düşülebilir; düşülemeyen kısım sonraki yıla devreder. Revolut senin yerine vergi kesmediği için bu tutarları beyannamede (Anlage KAP) kendin yazarsın; buradaki rakamlar o işi kolaylaştırmak için bir tahmindir.") }}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Hesap adımları</h2><span class="stamp">{{ r.year }} · tüm tutarlar EUR</span></div>
+  <div class="table-scroll"><table class="compact vg-steps">
+    <tr><td>Hisse satışları: kâr</td><td class="num pos">{{ eur(p.aktien.gains) }}</td></tr>
+    <tr><td>Hisse satışları: zarar</td><td class="num neg">{{ eur(p.aktien.losses) }}</td></tr>
+    <tr class="sum"><td>Hisse potu net</td><td class="num {{ p.aktien.net|sgn }}">{{ eur(p.aktien.net, true) }}</td></tr>
+    <tr class="sub"><td>önceki yıllardan devreden hisse zararı (uygulama hesabı)</td><td class="num">{{ eur(st.carry_s_in) }} · kullanılan {{ eur(st.used_s) }}</td></tr>
+    <tr><td>Temettü (brüt{% if r.div.assumed %}, tahmini{% endif %})</td><td class="num">{{ eur(r.div.gross) }}</td></tr>
+    {% if r.interest %}<tr><td>Faiz</td><td class="num">{{ eur(r.interest) }}</td></tr>{% endif %}
+    {% if p.sonstige.n %}<tr><td>Opsiyon / diğer satışlar net</td><td class="num {{ p.sonstige.net|sgn }}">{{ eur(p.sonstige.net, true) }}</td></tr>{% endif %}
+    {% if r.corp_cash %}<tr><td>Kurumsal işlem nakdi (sıfır maliyet)</td><td class="num">{{ eur(r.corp_cash, true) }}</td></tr>{% endif %}
+    {% if p.fonds.n or r.div.fund_dist %}<tr><td>ETF satışları net {{ eur(p.fonds.net, true) }} → %30 Teilfreistellung sonrası</td><td class="num">{{ eur(p.fonds.taxable, true) }}</td></tr>
+      {% if r.div.fund_dist %}<tr><td>ETF dağıtımları {{ eur(r.div.fund_dist) }} → Teilfreistellung sonrası</td><td class="num">{{ eur(r.div.fund_dist_taxable) }}</td></tr>{% endif %}{% endif %}
+    <tr class="sum"><td>Diğer toplam (sonstige)</td><td class="num {{ st.other_total|sgn }}">{{ eur(st.other_total, true) }}</td></tr>
+    {% if st.other_offsets_stock %}<tr class="sub"><td>diğer zarar, hisse kârından düşüldü</td><td class="num">{{ eur(st.other_offsets_stock) }}</td></tr>{% endif %}
+    {% if st.carry_o_in %}<tr class="sub"><td>önceki yıllardan devreden genel zarar · kullanılan</td><td class="num">{{ eur(st.carry_o_in) }} · {{ eur(st.used_o) }}</td></tr>{% endif %}
+    <tr class="sum"><td>Pozitif toplam (Pauschbetrag öncesi)</td><td class="num">{{ eur(st.base) }}</td></tr>
+    <tr><td>− Sparer-Pauschbetrag (en çok {{ tn(st.pauschbetrag_max, 0) }} €)</td><td class="num">{{ eur(st.pauschbetrag) }}</td></tr>
+    <tr class="sum"><td>Vergiye tabi</td><td class="num">{{ eur(st.taxable) }}</td></tr>
+    <tr><td>%25 Abgeltungsteuer</td><td class="num">{{ eur(st.kapest_gross) }}</td></tr>
+    <tr><td>− mahsup edilen ABD stopajı{% if r.div.assumed %} (tahmini){% endif %}</td><td class="num">{{ eur(st.credit) }}</td></tr>
+    <tr><td>+ %5,5 Solidaritätszuschlag</td><td class="num">{{ eur(st.soli) }}</td></tr>
+    <tr class="sum"><td>Tahmini vergi</td><td class="num">{{ eur(st.tax) }}</td></tr>
+    <tr class="sub"><td>yıl sonuna devreden zarar: hisse · diğer</td><td class="num">{{ eur(st.carry_s_out) }} · {{ eur(st.carry_o_out) }}</td></tr>
+  </table></div>
+  {{ simple("Sıra şöyle: önce hisse kâr ve zararları kendi aralarında netleşir (hisse zararı başka hiçbir gelirden düşülemez). Sonra temettü, faiz ve diğer kalemler eklenir; bunlardaki zarar ise hisse kârından da düşülebilir. Çıkan pozitif toplamdan yıllık 1.000 € muafiyet düşülür, kalanın %25'i vergi, onun da %5,5'i Soli'dir. ABD'nin temettüden kestiği %15, Almanya'daki vergiden mahsup edilir. Devreden zarar: uygulamanın önceki yılları da aynı kurallarla hesaplayıp taşıdığı tutar; gerçekte Finanzamt'ın önceki yıllar için tespit ettiği tutar (Verlustfeststellung) geçerlidir.") }}
+</section>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Beyanname eşlemesi</h2><span class="band warn">{{ r.mapping_note }}</span></div>
+  <div class="table-scroll"><table class="compact vg-map">
+    <tr><th>Form</th><th>Alan (Almanca form metni, yaklaşık) · not</th><th class="num">Tutar</th></tr>
+    {% for m in r.mapping %}<tr><td class="small nw">{{ m.form }}</td><td class="f">{{ m.field }}<div class="xs muted">{{ m.note }}</div></td>
+      <td class="num nw"><b>{{ eur(m.value) }}</b></td></tr>{% endfor %}
+  </table></div>
+  <p class="xs muted" style="margin:8px 0 0">Satır numaraları her yıl değişir; burada bilerek verilmedi. Kâr ve zarar ayrı alanlara pozitif sayı olarak yazılır, mahsubu Finanzamt yapar.
+    Alman bir bankada Freistellungsauftrag ile muafiyetin bir kısmını kullandıysan kalan muafiyet daha azdır.</p>
+  {{ simple("Revolut yabancı (Litvanya) bir aracı kurum olduğundan bu gelirler 'yurt içinde vergi kesintisine uğramamış yabancı sermaye gelirleri' olarak Anlage KAP'a yazılır. Hisse satış kârı ayrıca 'bunun içinden hisse satış kârı' alanına, hisse zararı ise ayrı zarar alanına girer. ETF'ler Anlage KAP-INV'e, 1 yıl içinde satılan kripto Anlage SO'ya gider. Tablo hangi rakamın nereye gittiğine dair bir yol haritasıdır; formun o yılki resmi açıklamasıyla karşılaştır.") }}
+</section>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Satışlar · FIFO</h2>
+    <span class="stamp">{{ r.sales|length }} satır · alış günü ve satış günü ECB kuru{% if r.last_rate_day %} · son kur {{ r.last_rate_day }}{% endif %}</span></div>
+  {% if r.sales %}<div class="table-scroll"><table class="compact vg-sales">
+    <tr><th>Tarih</th><th>Sembol</th><th class="num">Adet</th><th class="num">FIFO maliyet</th><th class="num">Satış geliri</th><th class="num">Kazanç</th>
+      <th class="num">Gün</th><th>Pot</th><th class="num">USD kazanç</th><th class="num">Kur</th></tr>
+    {% for s in r.sales %}<tr>
+      <td title="{{ s.ts }}">{{ s.day|trdate }}</td>
+      <td><a href="/h/{{ s.symbol }}"><b>{{ s.symbol }}</b></a>{% if s.sub %} <span class="xs muted">{{ s.sub }}</span>{% endif %}{% if s.excess %} <span class="xs neg" title="eldekinden fazla satış; fazlası yok sayıldı">⚠</span>{% endif %}</td>
+      <td class="num">{{ tn(s.qty, 4) }}</td>
+      <td class="num" title="{{ s.lots }} lot · ilk alış {{ s.first_buy }} · son alış {{ s.last_buy }}">{{ eur(s.cost_eur) }}</td>
+      <td class="num">{{ eur(s.proceeds_eur) }}</td>
+      <td class="num {{ s.gain_eur|sgn }}"><b>{{ eur(s.gain_eur, true) }}</b></td>
+      <td class="num" title="lotlar {{ s.hold_min }}–{{ s.hold_max }} gün">{{ tn(s.hold_days, 0) }}</td>
+      <td><span class="vg-pot {{ s.pot }}">{{ s.pot_label }}</span></td>
+      <td class="num {{ s.gain_ccy|sgn }} small">{{ s.gain_ccy|usd2 if s.currency == 'USD' else tn(s.gain_ccy, 2) ~ ' ' ~ s.currency }}</td>
+      <td class="num xs muted" title="{{ s.sell_rate_src or 'kur yok' }} · {{ s.sell_rate_day or '' }}{% if s.buy_rate_min %} · alış kur(lar)ı {{ tn(s.buy_rate_min, 4) }}–{{ tn(s.buy_rate_max, 4) }}{% endif %}">{% if s.sell_rate %}{{ tn(s.sell_rate, 4) }}{% else %}doğrulanamadı{% endif %}</td>
+    </tr>{% endfor %}
+  </table></div>
+  <p class="xs muted" style="margin:6px 0 0">Kur = 1 € kaç {{ r.sales[0].currency }} (ECB referans kuru, işlem gününde veya öncesindeki son yayın). Maliyete alış ücreti eklendi, satış gelirinden satış ücreti düşüldü.
+    Bölünmeler (split) için adetler bugünkü pay bazına çevrildi; maliyet değişmez.</p>
+  {% else %}<div class="muted small">Bu yıl satış yok.</div>{% endif %}
+  {{ simple("FIFO: 'ilk giren ilk çıkar'. Aynı hisseyi farklı fiyatlardan birkaç kez aldıysan, sattığında vergi hesabında önce en eski alımların satıldığı kabul edilir. Her alım o günkü euro kuruyla, her satış da satış günündeki kurla euroya çevrilir; yani dolar bazında kârsız bir satış, dolar euroya karşı değer kazandıysa euro bazında kârlı çıkabilir (ya da tersi). Gün: satılan payların ortalama kaç gün elde tutulduğu.") }}
+</section>
+
+<div class="vg-cols">
+<section class="panel hsec">
+  <div class="sec-head"><h2>Temettü ve faiz</h2><span class="stamp">{{ r.div.n }} temettü kaydı</span></div>
+  {% if r.dividends %}<div class="table-scroll"><table class="compact">
+    <tr><th>Sembol</th><th class="num">Adet</th><th class="num">Net (gelen)</th><th class="num">Net €</th><th class="num">Brüt €</th><th class="num">Stopaj €</th></tr>
+    {% for d in r.dividends %}<tr><td><b>{{ d.symbol }}</b>{% if d.fund %} <span class="xs muted">ETF</span>{% endif %}</td><td class="num">{{ d.n }}</td>
+      <td class="num">{{ d.net_ccy|usd2 if d.currency == 'USD' else tn(d.net_ccy, 2) ~ ' ' ~ d.currency }}</td><td class="num">{{ eur(d.net_eur) }}</td>
+      <td class="num">{{ eur(d.gross_eur) }}</td><td class="num">{{ eur(d.wht_eur) }}</td></tr>{% endfor %}
+    <tr><td><b>Toplam</b></td><td></td><td></td><td class="num"><b>{{ eur(r.div.net) }}</b></td><td class="num"><b>{{ eur(r.div.gross) }}</b></td><td class="num"><b>{{ eur(r.div.wht) }}</b></td></tr>
+  </table></div>{% else %}<div class="muted small">Bu yıl temettü yok.</div>{% endif %}
+  {% if r.interest %}<p class="small">Faiz: <b>{{ eur(r.interest) }}</b></p>{% endif %}
+  <p class="xs muted" style="margin:6px 0 0">{% if r.div.assumed %}Kaynak: Revolut ledger. Ayrı stopaj kaydı yok; tutarlar net görünüyor (ör. QCOM 2024-12: 1,22 hisse × 0,85 $ = 1,04 $ brüt, gelen 0,88 $ ≈ %15 kesinti). Brüt = net ÷ 0,85 tahmini; ABD dışı şirketlerde (ör. NOK) oran farklı olabilir — doğrulanamadı.{% else %}Kaynak: ledger'daki stopaj kayıtları.{% endif %}</p>
+  {{ simple("ABD, yabancı yatırımcıya ödediği temettüden %15 vergi keser (W-8BEN formu varsa). Almanya brüt temettüyü gelir sayar ama ABD'ye ödenen bu %15'i kendi vergisinden düşer, yani çifte vergi olmaz. Bu yüzden beyannamede brüt temettü ve 'mahsup edilebilir yabancı vergi' ayrı yazılır.") }}
+</section>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>FIFO ve ortalama maliyet</h2><span class="stamp">{{ r.year }} satışları</span></div>
+  <table class="compact">
+    <tr><td>Uygulamanın gerçekleşen K/Z'si (ortalama maliyet, alt portföy bazında, USD)</td><td class="num">{% if r.compare.avg_cost_usd is not none %}{{ r.compare.avg_cost_usd|usd2 }}{% else %}<span class="muted">doğrulanamadı</span>{% endif %}</td></tr>
+    <tr><td>FIFO, tüm hesap tek depo, USD</td><td class="num">{{ r.compare.fifo_usd|usd2 }}</td></tr>
+    <tr><td><b>FIFO, EUR (vergide geçerli olan)</b></td><td class="num"><b>{{ eur(r.compare.fifo_eur, true) }}</b></td></tr>
+    {% if r.compare.fx_effect is not none %}<tr><td class="muted">bunun kur etkisi (alış ve satış kuru farkı)</td><td class="num {{ r.compare.fx_effect|sgn }}">{{ eur(r.compare.fx_effect, true) }}</td></tr>{% endif %}
+  </table>
+  {{ simple("Portföy sayfası her hissenin ortalama maliyetini kullanır: tüm alımların ortalaması. Alman vergi hukuku ise FIFO ister: önce en eski alım satılmış sayılır. Pozisyonun tamamını kapattığında ikisi aynı sonuca varır; kısmi satışlarda farklıdır. Ayrıca vergi euro üzerinden hesaplanır: alım alış günündeki kurla, satış satış günündeki kurla çevrilir, bu yüzden dolar kârı ile euro kârı farklıdır. Alt portföyler (P1/P2) uygulama içi bir ayrımdır; Revolut'ta tek depo olduğu için FIFO tüm hesap için birlikte işler.") }}
+</section>
+</div>
+
+{% if p.krypto.n or p.krypto_frei.n %}<section class="panel hsec">
+  <div class="sec-head"><h2>Kripto · §23 EStG (Anlage SO)</h2><span class="stamp">Freigrenze {{ tn(r.crypto.freigrenze, 0) }} € · kişisel gelir vergisi oranı</span></div>
+  <table class="compact">
+    <tr><td>1 yıl içinde satılan lotlar net</td><td class="num {{ r.crypto.net|sgn }}">{{ eur(r.crypto.net, true) }}</td></tr>
+    <tr><td>1 yıldan uzun tutulan lotlar (vergisiz)</td><td class="num">{{ eur(r.crypto.tax_free, true) }}</td></tr>
+    <tr><td>Vergiye tabi{% if r.crypto.freigrenze_applied %} (Freigrenze altında → 0){% endif %}</td><td class="num"><b>{{ eur(r.crypto.taxable) }}</b></td></tr>
+    <tr class="muted"><td>devreden §23 zararı: giriş · çıkış</td><td class="num">{{ eur(r.crypto.carry_in) }} · {{ eur(r.crypto.carry_out) }}</td></tr>
+  </table>
+  {{ simple("Kripto Almanya'da sermaye geliri değil 'özel satış işlemi' sayılır. 1 yıldan uzun tuttuğun coin'i satarsan kâr tamamen vergisizdir. 1 yıl içinde satılanların yıllık net kârı sınırın (Freigrenze) altındaysa vergi yok; sınırı 1 € bile aşarsa tamamı vergilenir. Bu kâr %26,375 ile değil kişisel gelir vergisi oranınla vergilenir, o yüzden yukarıdaki tahmini vergiye dahil edilmedi.") }}
+</section>{% endif %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Yıl sonu açık lotlar</h2><span class="stamp">{% if r.running %}bugün{% else %}31.12.{{ r.year }}{% endif %} · Yahoo kapanış · vergilenmez</span></div>
+  {% if r.open_lots %}<div class="table-scroll"><table class="compact">
+    <tr><th>Sembol</th><th class="num">Adet</th><th class="num">Lot</th><th>En eski alış</th><th class="num">FIFO maliyet</th><th class="num">Değer</th><th class="num">Gerçekleşmemiş</th></tr>
+    {% for o in r.open_lots %}<tr><td><a href="/h/{{ o.symbol }}"><b>{{ o.symbol }}</b></a></td><td class="num">{{ tn(o.qty, 4) }}</td><td class="num">{{ o.lots }}</td>
+      <td>{{ o.oldest|trdate }}{% if o.free_from %} <span class="xs muted">vergisiz: {{ o.free_from }}</span>{% endif %}</td>
+      <td class="num">{{ eur(o.cost_eur) }}</td><td class="num" title="{{ o.price_day or '' }} kapanışı · kur {{ o.fx_day or '—' }}">{{ eur(o.value_eur) }}</td>
+      <td class="num {{ o.unreal_eur|sgn }}">{{ eur(o.unreal_eur, true) }}</td></tr>{% endfor %}
+    <tr><td colspan="6"><b>Toplam gerçekleşmemiş</b></td><td class="num {{ r.open_unreal_eur|sgn }}"><b>{{ eur(r.open_unreal_eur, true) }}</b></td></tr>
+  </table></div>
+  {% if r.running %}<p class="xs muted" style="margin:6px 0 0">Bu yıl kalan Sparer-Pauschbetrag: {{ eur(st.pauschbetrag_max - st.pauschbetrag) }}. Bilgi amaçlı; al/sat önerisi değildir.</p>{% endif %}
+  {% else %}<div class="muted small">Açık pozisyon yok.</div>{% endif %}
+  {{ simple("Satmadığın hisse ne kadar değer kazanmış ya da kaybetmiş olursa olsun vergilenmez; vergi yalnız satışta doğar. Bu tablo, yıl sonunda elinde kalan lotların FIFO maliyetini ve o günkü değerini euro olarak gösterir.") }}
+</section>
+
+<section class="panel hsec vg-issues">
+  <div class="sec-head"><h2>Veri kontrolleri ve varsayımlar</h2><span class="stamp">{{ r.issues|length }} not</span></div>
+  {% for i in r.issues %}<div class="result {{ 'neg' if i.level == 'warn' else 'neu' }} small">{{ i.text }}</div>{% else %}<div class="muted small">Sorun bulunmadı.</div>{% endfor %}
+  <ul class="vg-notes">
+    <li>Kur: ECB referans kuru (resmi), işlem gününde ya da öncesindeki son yayın{% if r.fx.ecb_last %}; önbellekte {{ r.fx.ecb_first }} → {{ r.fx.ecb_last }}{% endif %}. Elde tutulan dolar nakdindeki kur kazancı ayrıca vergilenebilir (§23); burada hesaplanmadı.</li>
+    <li>ETF'ler için hisse fonu varsayımıyla %30 Teilfreistellung uygulanır; birikimli fonlarda Vorabpauschale hesaplanmadı.</li>
+    <li>Saklama ücretleri gibi giderler düşülmez (Sparer-Pauschbetrag dışında Werbungskosten indirilemez).</li>
+    <li>Devreden zararlar uygulamanın kendi hesabıdır; önceki yıllarda Finanzamt'ın tespit ettiği tutarlar esastır.</li>
+    <li>Yıl sonunda açık lotlar vergilenmez. Yıl sınırı Almanya saatine göre (Europe/Berlin).</li>
+  </ul>
+</section>
+{% endif %}
+{% endblock %}

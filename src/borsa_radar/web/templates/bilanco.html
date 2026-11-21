@@ -1,0 +1,170 @@
+{% extends "base.html" %}
+{% block title %}{{ b.symbol }} · Bilanço{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% macro ttag(t) %}{% if t == 'amc' %}<span class="chip xs">kapanış sonrası</span>{% elif t == 'bmo' %}<span class="chip xs">açılış öncesi</span>{% else %}<span class="chip xs warn">saat belirsiz</span>{% endif %}{% endmacro %}
+{% block content %}
+<style>
+  .earn-tiles { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); }
+  .earn-tiles .val small { font-size: 13px; font-weight: 500; color: var(--muted); }
+  .earn-range { position: relative; height: 10px; background: var(--panel2); border-radius: 5px; margin: 8px 0 4px; border: 1px solid var(--border); }
+  .earn-range span { position: absolute; top: -1px; bottom: -1px; border-radius: 5px; }
+  .earn-range .im { background: #58a6ff55; border: 1px solid #58a6ff; }
+  .earn-range .hs { background: #d2992255; border: 1px solid #d29922; top: 2px; bottom: 2px; }
+  .earn-range .mid { left: 50%; width: 2px; background: var(--text); top: -3px; bottom: -3px; border-radius: 0; }
+  .wc-list { margin: 6px 0 0; padding-left: 18px; }
+  .wc-list li { margin: 3px 0; }
+  .earn-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .kvs { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; }
+  .kvs dt { color: var(--muted); } .kvs dd { margin: 0; font-variant-numeric: tabular-nums; }
+  table.nw td, table.nw th { white-space: nowrap; }
+  td.beat { color: var(--pos); } td.miss { color: var(--neg); }
+  @media (max-width: 800px) { .earn-grid { grid-template-columns: 1fr; } }
+</style>
+{% set n = b.next %}{% set e = b.est %}{% set im = b.implied %}{% set st = b.stats %}{% set ex = b.exposure %}{% set p = b.post %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px"><a href="/h/{{ b.symbol }}" style="color:inherit">{{ b.symbol }}</a> · Bilanço <span class="muted" style="font-size:15px;font-weight:400">{{ b.name if b.name != b.symbol }}</span></h1>
+    <div class="stamp">Fiyat T: <b>{{ b.last_bar or '—' }}</b> kapanışı · oluşturuldu {{ b.built_at.strftime('%d.%m %H:%M') }} · <a href="/bilancolar">Tüm bilançolar</a></div>
+  </div>
+  {% if b.ctx.card %}<a class="karne-mini {{ b.ctx.card.tone or 'neu' }}" href="/h/{{ b.symbol }}/karne"><b>{{ b.ctx.card.overall|round|int if b.ctx.card.overall is not none else '?' }}</b><span>Karne · {{ b.ctx.card.label }}</span><span class="xs muted">{{ b.ctx.card.created_at|local('%d.%m %H:%M') }}</span></a>{% endif %}
+</div>
+
+<div class="result {{ p.tone if p and (not n or n.days_to > 14) else 'neu' }}"><span class="lbl">Sonuç</span> {{ b.summary }}</div>
+{% if b.missing %}<div class="missing">doğrulanamadı: {{ b.missing|join(', ') }}</div>{% endif %}
+
+{# ── Post-mortem ── #}
+{% if p %}{% set r = p.reaction %}
+<section class="panel hsec">
+  <div class="sec-head"><h2>Ne değişti? · {{ earn.day_tr(p.date) }} raporu</h2>
+    <span class="stamp">{{ p.days_ago }} gün önce · {{ p.timing_tr }} · kaynak {{ p.src }}{% if p.rev_act is not none %} + FMP gelir{% endif %}</span></div>
+  <div class="tiles earn-tiles">
+    <div class="tile"><div class="lbl">EPS: gerçekleşen / beklenti</div>
+      <div class="val {{ p.surprise|sgn }}">{{ tn(p.eps_act) }}$ <small>/ {{ tn(p.eps_est) }}$</small></div>
+      <div class="sub {{ p.surprise|sgn }}">sürpriz {{ tp(p.surprise) }}</div></div>
+    <div class="tile"><div class="lbl">Gelir: gerçekleşen / beklenti</div>
+      {% if p.rev_act is not none %}<div class="val {{ p.rev_surprise|sgn }}">{{ big(p.rev_act) }} <small>/ {{ big(p.rev_est) }}</small></div>
+      <div class="sub {{ p.rev_surprise|sgn }}">sürpriz {{ tp(p.rev_surprise) }}</div>
+      {% else %}<div class="val muted">doğrulanamadı</div><div class="sub muted">FMP gelir satırı yok</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">Açılış boşluğu</div>
+      {% if r %}<div class="val {{ r.gap_pct|sgn }}">{{ tp(r.gap_pct) }}</div><div class="sub muted">{{ earn.day_tr(r.pre_day) }} {{ tn(r.pre_close) }}$ → açılış {{ tn(r.open) }}$</div>
+      {% else %}<div class="val muted">—</div><div class="sub muted">seans kapanışı yok</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">İlk seans kapanışı</div>
+      {% if r %}<div class="val {{ r.move_pct|sgn }}">{{ tp(r.move_pct) }}</div><div class="sub muted">{{ earn.day_tr(r.day) }} kapanış {{ tn(r.close) }}$ ({{ r.window }})</div>
+      {% else %}<div class="val muted">—</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">Ertesi gün</div>
+      {% if r and r.next_pct is not none %}<div class="val {{ r.next_pct|sgn }}">{{ tp(r.next_pct) }}</div><div class="sub muted">{{ earn.day_tr(r.next_day) }} · iki günde {{ tp(r.two_day_pct) }}</div>
+      {% else %}<div class="val muted">—</div><div class="sub muted">henüz kapanmadı</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">Opsiyon beklentisi vs gerçek</div>
+      {% if p.implied_before %}<div class="val">±%{{ tn(p.implied_before.pct, 1) }}</div><div class="sub muted">kayıt {{ p.implied_before.saved_at|local('%d.%m %H:%M') }} · {{ p.implied_before.expiry }}</div>
+      {% else %}<div class="val muted">—</div><div class="sub muted">rapordan önce kayıt yok</div>{% endif %}</div>
+  </div>
+  <ul class="wc-list">{% for l in p.what_changed %}<li>{{ l }}</li>{% endfor %}</ul>
+  {{ simple("Rapor açıklandıktan sonra ne oldu: şirketin açıkladığı kâr (EPS) ve gelir, analistlerin beklentisiyle kıyaslanır. Açılış boşluğu: rapordan önceki son kapanış ile ilk seansın açılışı arasındaki fark (piyasanın ilk tepkisi). İlk seans kapanışı: gün sonunda tepkinin ne kadarı kaldı. Ertesi gün: tepki devam mı etti, geri mi alındı. Tahmin revizyonu: analistler rapordan sonra gelecek çeyrek tahminlerini yukarı mı aşağı mı çekti; bu çoğu zaman fiyatın sonraki haftalarını rapordaki rakamdan daha çok etkiler.") }}
+</section>
+{% endif %}
+
+{# ── Preview ── #}
+<section class="panel hsec">
+  <div class="sec-head"><h2>{% if n %}Sıradaki bilanço · {{ n.day_tr }}{% else %}Sıradaki bilanço{% endif %}</h2>
+    <span class="stamp">{% if n %}kaynak {{ n.src }}{% for o in n.others %} · {{ o.src }} {{ o.date }}{% endfor %}{% endif %}</span></div>
+  {% if n and n.conflict %}<div class="missing">Kaynaklar arasında tarih farkı: {{ n.conflict|join(', ') }} — şirketin duyurusunu kontrol et.</div>{% endif %}
+  {% if not n %}<div class="empty">Sıradaki bilanço tarihi doğrulanamadı.</div>{% else %}
+  <div class="tiles earn-tiles">
+    <div class="tile"><div class="lbl">Tarih</div><div class="val">{{ earn.day_tr(n.date) }}</div>
+      <div class="sub">{{ ttag(n.timing) }} {% if n.days_to == 0 %}<b>bugün</b>{% elif n.days_to == 1 %}<b>yarın</b>{% else %}{{ n.days_to }} gün sonra{% endif %}
+        {% if n.release_at %}<br><span class="xs muted">≈ {{ n.release_at|local('%d.%m %H:%M') }} Berlin</span>{% endif %}</div></div>
+    <div class="tile"><div class="lbl">EPS beklentisi</div>
+      <div class="val">{% if e.eps is not none %}{{ tn(e.eps) }}${% elif n.eps is not none %}{{ tn(n.eps) }}${% else %}—{% endif %}</div>
+      <div class="sub muted">{% if e.eps_lo is not none %}aralık {{ tn(e.eps_lo) }}–{{ tn(e.eps_hi) }} · {{ e.eps_n }} analist{% endif %}
+        {% if e.eps_growth is not none %}<br>geçen yıl {{ tn(e.eps_year_ago) }}$ → {{ tp(e.eps_growth, 0) }}{% endif %}
+        {% if n.fmp_eps is not none %}<br>FMP {{ tn(n.fmp_eps) }}${% endif %}{% if n.finnhub_eps is not none %} · Finnhub {{ tn(n.finnhub_eps) }}${% endif %}</div></div>
+    <div class="tile"><div class="lbl">Gelir beklentisi</div>
+      <div class="val">{{ big(e.rev) if e.rev else (big(n.fmp_rev) if n.fmp_rev else '—') }}</div>
+      <div class="sub muted">{% if e.rev_lo %}aralık {{ big(e.rev_lo) }}–{{ big(e.rev_hi) }}{% endif %}
+        {% if e.rev_growth is not none %}<br>yıllık {{ tp(e.rev_growth, 0) }}{% endif %}</div></div>
+    <div class="tile"><div class="lbl">Opsiyon ima edilen hareket ~</div>
+      {% if im %}<div class="val">±%{{ tn(im.pct, 1) }} <small>±{{ tn(im.move) }}$</small></div>
+      <div class="sub muted">{{ im.expiry }} vadesi · {{ tn(im.strike, 1) }}$ ATM{% if im.diluted %} · <span class="warn">vade rapordan {{ im.days_after }} gün sonra (seyreltilmiş)</span>{% endif %}
+        <br>aralık {{ tn(im.spot - im.move) }} – {{ tn(im.spot + im.move) }}$</div>
+      {% else %}<div class="val muted">—</div><div class="sub muted">doğrulanamadı{% if n.days_to > 55 %} (rapor 60 günlük zincirin dışında){% endif %}</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">Geçmiş tepki (son {{ st.n_moves }})</div>
+      {% if st.n_moves %}<div class="val">±%{{ tn(st.avg_abs, 1) }}</div>
+      <div class="sub muted"><span class="pos">{{ st.up }} yukarı</span> · <span class="neg">{{ st.down }} aşağı</span> · en büyük {{ tp(st.max) }}
+        {% if im and im.vs_hist %}<br>opsiyon / geçmiş = {{ tn(im.vs_hist, 1) }}×{% endif %}</div>
+      {% else %}<div class="val muted">—</div>{% endif %}</div>
+    <div class="tile"><div class="lbl">Tahmin aşımı</div>
+      {% if st.eps_n %}<div class="val">{{ st.beats }}/{{ st.eps_n }}</div>
+      <div class="sub muted">{{ st.misses }} ıska · aşınca yükseldi {{ st.beat_up }}/{{ st.beat_n }}{% if st.rev_n %}<br>gelir aşımı {{ st.rev_beats }}/{{ st.rev_n }}{% endif %}</div>
+      {% else %}<div class="val muted">—</div>{% endif %}</div>
+  </div>
+  {% if im or st.n_moves %}{% set scale = [ (im.pct if im else 0), (st.max|abs if st.max is not none else 0), 1 ]|max * 1.15 %}
+  <div class="earn-range" title="Mavi: opsiyonların fiyatladığı ± hareket · sarı: geçmiş ortalama ± hareket">
+    {% if im %}<span class="im" style="left:{{ 50 - im.pct / scale * 50 }}%;right:{{ 50 - im.pct / scale * 50 }}%"></span>{% endif %}
+    {% if st.avg_abs %}<span class="hs" style="left:{{ 50 - st.avg_abs / scale * 50 }}%;right:{{ 50 - st.avg_abs / scale * 50 }}%"></span>{% endif %}
+    <span class="mid"></span>
+  </div>
+  <div class="xs muted">{% if im %}<span style="color:#58a6ff">■</span> opsiyon ±%{{ tn(im.pct, 1) }} · {% endif %}<span style="color:#d29922">■</span> geçmiş ort. ±%{{ tn(st.avg_abs, 1) }} · ölçek ±%{{ tn(scale, 0) }}{% if im %} · {{ im.method }}{% endif %}{% if b.chain_stamp %} · {{ b.chain_stamp }}{% endif %}</div>
+  {% endif %}
+  {{ simple("Opsiyon ima edilen hareket: raporun hemen sonrasındaki ilk vadede, hisse fiyatına en yakın kullanım fiyatlı alım (call) ve satım (put) opsiyonlarının toplam fiyatı. Opsiyon satıcıları bu kadar hareketi bekleyip fiyatlıyor; hisse bu aralığın dışına çıkarsa 'beklenenden büyük' tepki demektir. Veriler Yahoo'dan, gecikmeli ve yaklaşıktır; vade rapordan birkaç gün sonraysa o günlerin normal oynaklığı da içindedir. Geçmiş tepki: son raporların her birinde, rapordan önceki son kapanış ile rapordan sonraki ilk seans kapanışı arasındaki değişim (kapanış sonrası raporda ertesi gün, açılış öncesi raporda aynı gün).") }}
+  {% endif %}
+</section>
+
+<div class="earn-grid" style="margin-top:14px">
+<section class="panel">
+  <div class="sec-head"><h2>Senin için</h2>{% if ex.price_day %}<span class="stamp">fiyat {{ ex.price_day }}</span>{% endif %}</div>
+  {% if ex.held %}
+  <dl class="kvs">
+    {% if ex.qty %}<dt>Pozisyon</dt><dd>{{ ex.qty|qty }} adet · {{ ex.value|usd }} · ağırlık %{{ tn(ex.weight, 1) }}{% if ex.subs %} · {{ ex.subs|join(', ') }}{% endif %}</dd>
+    <dt>Ortalama maliyet</dt><dd>{{ tn(ex.avg) }}$ · {{ tp(ex.unreal_pct) if ex.unreal_pct is not none else '' }}</dd>
+    <dt>Opsiyon fiyatlamasıyla</dt><dd>{% if ex.risk_implied is not none %}<b>±{{ ex.risk_implied|usd }}</b> (±%{{ tn(im.pct, 1) }}){% else %}doğrulanamadı{% endif %}</dd>
+    <dt>Geçmiş ortalamayla</dt><dd>{% if ex.risk_hist is not none %}±{{ ex.risk_hist|usd }} (±%{{ tn(st.avg_abs, 1) }}){% else %}—{% endif %}</dd>
+    {% if st.max is not none %}<dt>En büyük tepki olsaydı</dt><dd class="{{ st.max|sgn }}">{{ (ex.value * st.max / 100)|susd }} ({{ tp(st.max) }}, {{ st.max_day }})</dd>{% endif %}{% endif %}
+    {% for o in ex.options %}<dt>Opsiyon</dt><dd>{{ o.type }} {{ tn(o.strike, 1) }}$ · {{ o.expiry }} · {{ o.qty|qty }} kontrat · {{ o.value|usd }}{% if n and o.expiry >= n.date %} <span class="warn">rapordan sonra sona eriyor</span>{% endif %}</dd>{% endfor %}
+  </dl>
+  {% else %}<div class="muted small">Bu hissede pozisyonun yok.</div>{% endif %}
+  {% if b.ctx.setups %}<h2>Açık setup</h2>{% for x in b.ctx.setups %}<a class="flash" style="display:block" href="/setups#c{{ x.id }}">🎯 <b>{{ x.name_tr }}</b> ({{ x.day|trdate }}) · {{ x.status_tr }} · giriş {{ tn(x.entry_lo) }}–{{ tn(x.entry_hi) }}$, stop {{ tn(x.stop) }}$ · geçerlilik {{ x.valid_until|trdate }}{% if n and x.valid_until >= n.date %} · <span class="warn">rapor setup süresi içinde</span>{% endif %}</a>{% endfor %}{% endif %}
+  {% set tz = b.ctx.thesis %}
+  <h2>Tez</h2>
+  {% if tz %}<div class="small">{{ tz.thesis|truncate(240) }} <a href="/tez#t{{ tz.id }}">Tez defteri →</a></div>
+    {% if tz.catalysts %}<div class="xs muted" style="margin-top:4px">Katalizör: {{ tz.catalysts|truncate(160) }}</div>{% endif %}
+    <div class="chips" style="margin-top:6px">{% for r in tz.rules %}<span class="chip xs {{ 'neg' if r.status == 'triggered' and not r.good else 'pos' if r.status == 'triggered' else '' }}" title="{{ r.last_value or '' }}">{{ r.label }}{% if r.status == 'triggered' %} ✕{% endif %}</span>{% else %}<span class="xs muted">çıkış kuralı yok</span>{% endfor %}</div>
+    {% if tz.next_review %}<div class="xs muted" style="margin-top:4px">Sonraki gözden geçirme {{ tz.next_review|trdate }}{% if tz.review_due %} · <b class="neg">zamanı geldi</b>{% endif %}</div>{% endif %}
+  {% elif ex.held %}<div class="small">Tez yazılı değil. Bilançodan önce <a href="/tez?symbol={{ b.symbol }}#yeni">neden tuttuğunu ve hangi rakamın seni çıkaracağını yaz →</a></div>
+  {% else %}<div class="muted small">Tez yok.</div>{% endif %}
+  {{ simple("Pozisyonunun değeri × beklenen hareket = rapor gecesi kâğıt üzerinde kazanıp kaybedebileceğin yaklaşık tutar. Bu bir tahmin aralığı; gerçek hareket daha büyük ya da küçük olabilir. Rapordan önce tezini ve çıkış kuralını yazmak, sonuç geldiğinde duyguyla değil plana göre karar vermeni sağlar.") }}
+</section>
+
+<section class="panel">
+  <div class="sec-head"><h2>Tahmin revizyonları</h2><span class="stamp">Yahoo EPS tahmin geçmişi</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Dönem</th><th class="num">Şimdi</th><th class="num">7 gün önce</th><th class="num">30 gün önce</th><th class="num">90 gün önce</th><th class="num">30g değişim</th></tr>
+    {% for lbl, r in [('Bu çeyrek', e.rev_q), ('Gelecek çeyrek', e.next_q), ('Bu mali yıl', e.rev_y)] %}{% if r %}<tr>
+      <td>{{ lbl }}</td><td class="num">{{ tn(r.current) }}</td><td class="num">{{ tn(r.d7) }}</td><td class="num">{{ tn(r.d30) }}</td><td class="num">{{ tn(r.d90) }}</td>
+      <td class="num {{ (r.chg30 if r.chg30 is not none else r.diff30)|sgn }}">{{ earn.rev_text(r, 30) }}</td></tr>{% endif %}{% endfor %}
+  </table></div>
+  {% if e.rev_q and e.rev_q.direction %}<div class="small" style="margin-top:6px">Bu çeyrek tahmini son 30 günde <b class="{{ 'pos' if e.rev_q.direction == 'yukarı' else 'neg' if e.rev_q.direction == 'aşağı' else '' }}">{{ e.rev_q.direction }}</b> yönlü.</div>{% endif %}
+  {{ simple("Analistler rapor yaklaşırken tahminlerini günceller. Rapordan önceki haftalarda tahminlerin yükselmesi beklentinin (çıtanın) yükseldiği anlamına gelir: 'beklentiyi aştı' haberi bile yetmeyebilir. Zarar eden şirketlerde yüzde yerine dolar farkı gösterilir.") }}
+</section>
+</div>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Geçmiş raporlar ve fiyat tepkisi</h2><span class="stamp">son {{ b.history|length }} rapor · Yahoo EPS, FMP gelir, Yahoo günlük kapanış</span></div>
+  {% if b.history %}<div class="table-scroll"><table class="compact nw">
+    <tr><th>Rapor</th><th>Saat</th><th class="num">EPS bekl.</th><th class="num">EPS</th><th class="num">Sürpriz</th><th class="num">Gelir</th><th class="num">Gelir sürp.</th>
+      <th class="num">Önceki kapanış</th><th class="num">Açılış boşluğu</th><th class="num">İlk seans</th><th class="num">Ertesi gün</th></tr>
+    {% for r in b.history %}{% set rx = r.reaction %}<tr>
+      <td>{{ r.date|trdate }}</td><td class="xs">{{ r.timing_tr }}</td>
+      <td class="num">{{ tn(r.eps_est) }}</td><td class="num">{{ tn(r.eps_act) }}</td>
+      <td class="num {{ 'beat' if r.surprise is not none and r.surprise > 0.05 else 'miss' if r.surprise is not none and r.surprise < -0.05 }}">{{ tp(r.surprise) }}</td>
+      <td class="num">{{ big(r.rev_act) if r.rev_act else '—' }}</td><td class="num {{ r.rev_surprise|sgn }}">{{ tp(r.rev_surprise) }}</td>
+      {% if rx %}<td class="num">{{ tn(rx.pre_close) }} <span class="xs muted">{{ rx.pre_day[5:] }}</span></td>
+      <td class="num {{ rx.gap_pct|sgn }}">{{ tp(rx.gap_pct) }}</td><td class="num {{ rx.move_pct|sgn }}"><b>{{ tp(rx.move_pct) }}</b> <span class="xs muted">{{ rx.day[5:] }}</span></td>
+      <td class="num {{ rx.next_pct|sgn }}">{{ tp(rx.next_pct) }}</td>
+      {% else %}<td class="num muted" colspan="4">fiyat verisi yok</td>{% endif %}
+    </tr>{% endfor %}
+  </table></div>{% else %}<div class="empty">Geçmiş rapor verisi doğrulanamadı.</div>{% endif %}
+  {{ simple("Her satır bir bilanço açıklaması. Sürpriz: açıklanan kâr beklentiden yüzde kaç farklı. İlk seans: rapordan önceki son kapanıştan, haberi fiyatlayan ilk seansın kapanışına değişim. Kapanış sonrası açıklanan raporda ilk seans ertesi gündür; saat belirsizse iki seanslık pencere kullanılır. 'Beklentiyi aştı ama düştü' satırları, piyasanın rakamdan çok yönlendirmeye (guidance) baktığını gösterir.") }}
+</section>
+
+<div class="stamp" style="margin-top:12px">{% for s in b.sources %}<span class="src">{{ s }}</span>{% endfor %}</div>
+{% endblock %}

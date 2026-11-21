@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Bilançolar · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% block content %}
+<style>
+  .earn-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
+  .earn-card { background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--neu); border-radius: 10px; padding: 11px 13px; display: block; color: var(--text); }
+  .earn-card:hover { text-decoration: none; border-color: #58a6ff88; }
+  .earn-card.held { border-left-color: var(--accent); }
+  .earn-card .top { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+  .earn-card .sym { font-size: 18px; font-weight: 700; }
+  .earn-card .when { font-size: 13px; text-align: right; }
+  .earn-card .nums { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  .earn-card .nums .lbl { font-size: 10px; }
+  .earn-card .nums b { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .earn-card .foot { margin-top: 8px; font-size: 12px; color: var(--muted); }
+  table.nw td, table.nw th { white-space: nowrap; }
+  .earn-day { margin: 16px 0 6px; font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+  @media (max-width: 480px) { .earn-cards { grid-template-columns: 1fr; } }
+</style>
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Bilançolar</h1>
+    <p class="lede">Portföyündeki ve izleme listendeki hisselerin önümüzdeki {{ u.days }} gündeki bilanço açıklamaları; önce portföyündekiler.</p>
+  </div>
+  <div class="stamp">
+    <div class="tabs">{% for d in [7, 14, 30] %}<a href="/bilancolar?days={{ d }}" class="{{ 'active' if u.days == d }}">{{ d }} gün</a>{% endfor %}</div>
+    <span>{{ u.n }} hisse tarandı · {{ u.built_at.strftime('%d.%m %H:%M') }}</span>
+  </div>
+</div>
+
+{% set held = u.soon|selectattr('held')|list %}{% set watch = u.soon|rejectattr('held')|list %}
+{% macro card(b) %}{% set n = b.next %}{% set im = b.implied %}{% set st = b.stats %}{% set ex = b.exposure %}{% set e = b.est %}
+<a class="earn-card {{ 'held' if b.held }}" href="/h/{{ b.symbol }}/bilanco">
+  <div class="top">
+    <div><span class="sym">{{ b.symbol }}</span> {% if b.held %}<span class="badge">portföyde</span>{% endif %}
+      {% if b.ctx.card %}<span class="badge {{ b.ctx.card.tone }}">karne {{ b.ctx.card.overall|round|int }}</span>{% endif %}</div>
+    <div class="when"><b>{{ earn.day_tr(n.date) }}</b><br><span class="xs muted">{{ n.timing_tr }}{% if n.days_to == 0 %} · bugün{% elif n.days_to == 1 %} · yarın{% else %} · {{ n.days_to }} gün{% endif %}</span></div>
+  </div>
+  <div class="nums">
+    <div><span class="lbl">EPS bekl.</span><b>{% if e.eps is not none %}{{ tn(e.eps) }}${% elif n.eps is not none %}{{ tn(n.eps) }}${% else %}—{% endif %}</b></div>
+    <div><span class="lbl">Opsiyon ~</span><b>{% if im %}±%{{ tn(im.pct, 1) }}{% else %}<span class="muted">—</span>{% endif %}</b></div>
+    <div><span class="lbl">Geçmiş ort.</span><b>{% if st.n_moves %}±%{{ tn(st.avg_abs, 1) }}{% else %}—{% endif %}</b></div>
+  </div>
+  <div class="foot">
+    {% if st.eps_n %}aşım {{ st.beats }}/{{ st.eps_n }} · {{ st.up }}↑ {{ st.down }}↓{% endif %}
+    {% if e.rev_q and e.rev_q.direction %} · tahmin {{ e.rev_q.direction }}{% endif %}
+    {% if ex.held and ex.value %}<br>Pozisyon {{ ex.value|usd }}{% if ex.risk_implied is not none %} · <b class="warn">±{{ ex.risk_implied|usd }}</b> risk{% elif ex.risk_hist is not none %} · ±{{ ex.risk_hist|usd }} (geçmişe göre){% endif %}{% endif %}
+    {% if ex.options %}<br>{{ ex.options|length }} opsiyon pozisyonu · {{ ex.options_value|usd }}{% endif %}
+    {% if n.conflict %}<br><span class="warn">tarih farkı: {{ n.conflict|join(', ') }}</span>{% endif %}
+  </div>
+</a>
+{% endmacro %}
+
+<section class="hsec">
+  <div class="sec-head"><h2>Portföyündekiler</h2><span class="stamp">mavi kenar = pozisyonun var</span></div>
+  {% if held %}<div class="earn-cards">{% for b in held %}{{ card(b) }}{% endfor %}</div>
+  {% else %}<div class="empty">Önümüzdeki {{ u.days }} günde portföyündeki hisselerden bilanço açıklayan yok.</div>{% endif %}
+</section>
+
+<section class="hsec">
+  <div class="sec-head"><h2>İzleme listesi</h2></div>
+  {% if watch %}<div class="earn-cards">{% for b in watch %}{{ card(b) }}{% endfor %}</div>
+  {% else %}<div class="empty">Önümüzdeki {{ u.days }} günde izleme listesinden bilanço yok.</div>{% endif %}
+</section>
+{{ simple("Opsiyon ~: rapordan hemen sonraki vadede opsiyonların fiyatladığı yaklaşık ± hareket (Yahoo, gecikmeli; bu sayfa hız için son kaydedilen zinciri kullanır, hisseye tıklayınca güncellenir). Geçmiş ort.: son raporlarda hissenin ilk seanstaki ortalama mutlak hareketi. Risk: pozisyon değerin × opsiyonların beklediği hareket = rapor gecesi kâğıt üzerinde oynayabilecek tutar.") }}
+
+{% if u.recent %}<section class="panel hsec">
+  <div class="sec-head"><h2>Son raporlar · ne değişti</h2><span class="stamp">son 10 gün</span></div>
+  <div class="table-scroll"><table class="compact nw">
+    <tr><th>Hisse</th><th>Rapor</th><th class="num">EPS / bekl.</th><th class="num">Sürpriz</th><th class="num">Açılış</th><th class="num">İlk seans</th><th class="num">Ertesi gün</th><th class="num">Tahmin (7g)</th></tr>
+    {% for b in u.recent %}{% set p = b.post %}{% set r = p.reaction %}<tr>
+      <td><a href="/h/{{ b.symbol }}/bilanco"><b>{{ b.symbol }}</b></a>{% if b.held %} <span class="xs muted">portföyde</span>{% endif %}</td>
+      <td>{{ earn.day_tr(p.date) }} <span class="xs muted">{{ p.timing_tr }}</span></td>
+      <td class="num">{{ tn(p.eps_act) }} / {{ tn(p.eps_est) }}</td><td class="num {{ p.surprise|sgn }}">{{ tp(p.surprise) }}</td>
+      <td class="num {{ (r.gap_pct if r else none)|sgn }}">{{ tp(r.gap_pct) if r else '—' }}</td>
+      <td class="num {{ (r.move_pct if r else none)|sgn }}"><b>{{ tp(r.move_pct) if r else '—' }}</b></td>
+      <td class="num {{ (r.next_pct if r else none)|sgn }}">{{ tp(r.next_pct) if r else '—' }}</td>
+      <td class="num">{{ earn.rev_text(b.est.rev_q, 7) }}</td>
+    </tr>{% endfor %}
+  </table></div>
+</section>{% endif %}
+
+{% if u.later %}<section class="panel hsec">
+  <div class="sec-head"><h2>Daha sonra</h2></div>
+  <div class="table-scroll"><table class="compact nw">
+    <tr><th>Tarih</th><th>Hisse</th><th>Saat</th><th class="num">EPS bekl.</th><th class="num">Geçmiş ort.</th><th class="num">Pozisyon</th></tr>
+    {% for b in u.later %}<tr><td>{{ earn.day_tr(b.next.date) }} <span class="xs muted">{{ b.next.date[:4] }}</span></td>
+      <td><a href="/h/{{ b.symbol }}/bilanco"><b>{{ b.symbol }}</b></a></td><td class="xs">{{ b.next.timing_tr }}</td>
+      <td class="num">{% if b.est.eps is not none %}{{ tn(b.est.eps) }}{% elif b.next.eps is not none %}{{ tn(b.next.eps) }}{% else %}—{% endif %}</td>
+      <td class="num">{{ ('±%' ~ tn(b.stats.avg_abs, 1)) if b.stats.n_moves else '—' }}</td>
+      <td class="num">{{ b.exposure.value|usd if b.exposure.held else '' }}</td></tr>{% endfor %}
+  </table></div>
+</section>{% endif %}
+{% if u.unknown %}<div class="missing" style="margin-top:10px">Tarihi doğrulanamayan: {{ u.unknown|join(', ') }}</div>{% endif %}
+{% endblock %}

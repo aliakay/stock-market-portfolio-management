@@ -1,0 +1,34 @@
+[project]
+name = "stock-market-portfolio-management"
+version = "0.1.0"
+description = "Self-hosted personal investing terminal: portfolio, risk, screener, market regime, news radar and backtest lab"
+readme = "README.md"
+authors = [
+    { name = "aliakay" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "apscheduler>=3.11.3",
+    "fastapi>=0.162.0",
+    "feedparser>=6.0.14",
+    "httpx>=0.28.1",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.33",
+    "uvicorn[standard]>=0.54.0",
+    "yfinance>=1.8.0",
+]
+
+[project.scripts]
+borsa-radar = "borsa_radar:main"
+
+[build-system]
+requires = ["uv_build>=0.13.5,<0.14.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.uv.build-backend]
+module-name = "borsa_radar"

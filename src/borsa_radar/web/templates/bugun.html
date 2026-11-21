@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% from "_macros.html" import event_card, cal_list, karar_chip %}
+{% block title %}Bugün · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Bugün</h1>
+    {% if headline %}<p class="lede">{{ headline }}</p>{% endif %}
+  </div>
+  <div class="stamp">Fiyatlar: Yahoo günlük kapanış · son gün <b>{{ updated.day if updated else '—' }}</b></div>
+</div>
+
+{% if board %}<section class="panel hsec karar-panel">
+  <div class="sec-head"><h2>Sonuç</h2><span class="stamp">T = <b>{{ board.as_of or '—' }}</b> · <a href="/karar">Karar sayfası →</a></span></div>
+  {% set bm = board.market or {} %}
+  <div class="result {{ bm.tone if bm.tone in ('pos', 'neg') else '' }}">{{ board.headline or '—' }}</div>
+  {% if board.comment %}<p class="small" style="margin:8px 0 0">{{ board.comment }}</p>{% endif %}
+  {% if bm.text and not board.comment %}<p class="small muted" style="margin:6px 0 0">{{ bm.text }}</p>{% endif %}
+  <div class="chips" style="margin-top:8px">{% for s in board.stance_counts or [] if s.n %}<a class="kchip {{ s.tone or 'neu' }}" href="/karar" title="{{ s.symbols|join(', ') }}">{{ s.stance_tr }} · {{ s.n }}{% if s.weight_pct is not none %} · %{{ tn(s.weight_pct, 0) }}{% endif %}</a>{% endfor %}</div>
+  {% if board.agenda %}<div class="kc-block"><div class="kc-lbl">Gündem</div>
+    {% for a in board.agenda[:3] %}<div class="small">{{ loop.index }}. {% if a.href or a.symbol %}<a href="{{ a.href or ('/h/' ~ a.symbol ~ '#karar') }}">{{ a.text }}</a>{% else %}{{ a.text }}{% endif %}</div>{% endfor %}</div>{% endif %}
+  {% if board.changes %}<div class="kc-block"><div class="kc-lbl">Durum değişiklikleri</div>
+    {% for c in board.changes[:5] %}<div class="small"><a href="/h/{{ c.symbol }}#karar"><b>{{ c.symbol }}</b></a> {{ c.from_tr }} → <b>{{ c.to_tr }}</b>{% if c.day %} <span class="muted xs">{{ c.day|trdate }}</span>{% endif %}</div>{% endfor %}</div>{% endif %}
+</section>{% endif %}
+
+<div class="tiles home-tiles">
+  {% if perf %}{% set d = perf.periods.day %}
+  <a class="tile" href="/portfolio"><div class="lbl">Portföy</div><div class="val">{{ perf.value|usd }}</div>
+    <div class="sub {{ d.pct|sgn }}">{{ d.pnl|susd }} · {{ d.pct|pct }} son gün</div>
+    <div class="sub muted">SPX {{ d.bench.SPX|pct }} · YTD {{ perf.periods.ytd.pct|pct }}</div></a>
+  {% else %}<a class="tile" href="/portfolio/trades"><div class="lbl">Portföy</div><div class="val">—</div><div class="sub muted">İşlem yok: döküm içe aktar →</div></a>{% endif %}
+  {% if reg %}<a class="tile" href="/piyasa"><div class="lbl">Piyasa rejimi · {{ reg.day }}</div>
+    <div class="val {{ reg.tone }}">{{ reg.label }}</div><div class="sub muted">puan {{ reg.overall|round|int }}/100 · iklim {{ tn(reg.climate, 1) }} · hava {{ '%+d'|format(reg.weather|int) if reg.weather is not none else '—' }}</div></a>{% endif %}
+  <a class="tile" href="/setups"><div class="lbl">Setup'lar · {{ setups_rep.day or '—' }}</div>
+    {% set older = open_setups|rejectattr('day', 'equalto', setups_rep.day)|list %}
+    <div class="val">{{ setups_rep.cards|length }} yeni{% if older %} · {{ older|length }} açık{% endif %}{% if setups_rep.discovery %} · {{ setups_rep.discovery|length }} keşif{% endif %}</div>
+    <div class="sub muted">{% for c in setups_rep.cards[:3] %}{{ c.symbol }} {{ c.name_tr|lower }}{% if not loop.last %} · {% endif %}{% else %}eşiği geçen yok{% endfor %}</div></a>
+  {% set nx = upcoming|selectattr('importance', 'ge', 4)|first %}
+  <a class="tile" href="/calendar"><div class="lbl">Sıradaki önemli olay</div>
+    {% if nx %}<div class="val" style="font-size:16px">{{ nx.name }}</div><div class="sub muted">{{ nx.release_at|local('%d.%m %H:%M') }}</div>
+    {% else %}<div class="val">—</div><div class="sub muted">48 saatte önem ≥4 olay yok</div>{% endif %}</a>
+</div>
+{% if reg and reg.summary and not board %}<div class="result {{ reg.tone }}" style="margin-bottom:12px"><span class="lbl">Piyasa</span> {{ reg.summary }} <a href="/piyasa" class="small">Rejim & Nabız →</a></div>{% endif %}
+
+{% set A = attention %}
+{% if A and (A.theses or A.missing or A.risk or A.alerts) %}<section class="panel hsec attn-panel">
+  <div class="sec-head"><h2>Dikkat</h2><span class="stamp"><a href="/tez">Tez defteri</a> · <a href="/portfolio/risk">Risk</a> · <a href="/alarmlar">Alarmlar</a></span></div>
+  {% for t in A.theses %}<div class="evrow small">🧭 <a href="/tez#t{{ t.id }}"><b>{{ t.symbol }}</b></a>
+    {% if t.triggered %}kural tetiklendi: {% for r in t.triggered %}{{ r.label }} ({{ r.last_value }}){% if not loop.last %}; {% endif %}{% endfor %}{% else %}tezi gözden geçirme zamanı ({{ t.next_review }}){% endif %}</div>{% endfor %}
+  {% for a in A.alerts %}<div class="evrow small">🔔 {{ a.label }} → {{ tp(a.fired_value, 1) if a.cond == 'move' else tn(a.fired_value) ~ '$' }} <span class="muted xs">{{ a.fired_at|local('%d.%m %H:%M') }}</span></div>{% endfor %}
+  {% for w in A.risk %}<div class="evrow small">⚠️ {{ w.text }}</div>{% endfor %}
+  {% if A.missing %}<div class="evrow small">✍️ Tezi yazılmamış pozisyonlar: {% for s in A.missing %}<a href="/tez?symbol={{ s }}#yeni">{{ s }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div>{% endif %}
+</section>{% endif %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Pozisyonlarım</h2><span class="stamp"><a href="/portfolio">Portföy →</a></span></div>
+  {% if pos %}<div class="table-scroll"><table class="compact wide-table">
+    <tr><th>Sembol</th>{% if board %}<th>Durum</th>{% endif %}<th class="num">Fiyat</th><th class="num">Gün</th><th class="num">K/Z %</th><th class="num">Ağırlık</th><th>Karne</th><th>Setup</th><th>Son gelişme (3 gün, önem ≥3)</th></tr>
+    {% for p in pos %}<tr>
+      <td><a href="/h/{{ p.symbol }}"><b>{{ p.symbol }}</b></a></td>
+      {% if board %}<td>{% set kc = (kcards or {}).get(p.symbol) %}{% if kc %}{{ karar_chip(kc) }}{% else %}<span class="muted">—</span>{% endif %}</td>{% endif %}
+      <td class="num">{{ p.price|usd2 }}</td><td class="num {{ p.day_pct|sgn }}">{{ p.day_pct|pct }}</td>
+      <td class="num {{ p.unreal_pct|sgn }}">{{ p.unreal_pct|pct }}</td><td class="num">{{ tn(p.weight, 1) }}%</td>
+      <td>{% if p.karne %}<a class="band {{ p.karne.tone }}" href="/h/{{ p.symbol }}/karne">{{ p.karne.overall|round|int }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td>{% if p.setup %}<a class="chip" href="/setups#c{{ p.setup.id }}">{{ p.setup.name_tr }} · {{ p.setup.status_tr }}</a>{% endif %}</td>
+      <td class="small">{% if p.event %}{{ p.event.d|dir_icon }} <a href="/e/{{ p.event.id }}">{{ p.event.title|truncate(90) }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+    </tr>{% endfor %}</table></div>
+  {% else %}<div class="muted">Açık pozisyon yok.</div>{% endif %}
+  {% if watch_quotes %}<div class="chips" style="margin-top:10px"><span class="xs muted">İzleme listesi:</span>
+    {% for s, q in watch_quotes.items() %}<a class="chip {{ q.change_pct|sgn }}" href="/h/{{ s }}">{{ s }} {{ q.change_pct|pct }}</a>{% endfor %}</div>{% endif %}
+</section>
+
+<div class="grid" style="margin-top:14px">
+  <section>
+    <div class="sec-head"><h2>Önemli gelişmeler (24 saat, önem ≥4)</h2><span class="stamp"><a href="/akis">Tüm akış →</a></span></div>
+    {% for e in top %}{{ event_card(e) }}{% else %}<div class="empty">Son 24 saatte önem ≥4 gelişme yok. <a href="/akis?imp=3&days=1">Önem ≥3 →</a></div>{% endfor %}
+  </section>
+  <aside>
+    <div class="panel"><h2 style="margin-top:0">Yaklaşan (48 saat)</h2>{{ cal_list(upcoming) }}<div style="margin-top:8px"><a href="/calendar">Tüm takvim →</a></div></div>
+    {% if open_setups %}<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Açık setup'lar</h2>
+      {% for o in open_setups[:8] %}<div class="evrow"><a href="/h/{{ o.symbol }}"><b>{{ o.symbol }}</b></a> <span class="small">{{ o.name_tr }}</span>
+        <span class="xs {{ 'pos' if o.status in ('triggered','t1') else 'muted' }}">{{ o.status_tr }}</span></div>{% endfor %}
+      <div style="margin-top:8px"><a href="/setups">Setup'lar →</a></div></div>{% endif %}
+    {% if digest %}<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Son özet</h2>
+      <details><summary class="small">{{ 'Sabah' if digest.kind == 'morning' else 'Akşam' }} özeti · {{ digest.created_at|local('%d.%m %H:%M') }}</summary>
+        <div class="digest-text small">{{ digest.content|safe }}</div></details>
+      <div style="margin-top:8px"><a href="/digests">Tüm özetler →</a></div></div>{% endif %}
+  </aside>
+</div>
+{% endblock %}

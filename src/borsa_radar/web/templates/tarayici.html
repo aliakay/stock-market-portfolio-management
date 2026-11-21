@@ -1,0 +1,112 @@
+{% extends "base.html" %}
+{% block title %}Hisse tarayıcı · Borsa Radar{% endblock %}
+{% macro fv(v, unit) -%}
+  {%- if v is none -%}<span class="muted">—</span>
+  {%- elif unit == '%' -%}<span class="{{ v|sgn }}">{{ tp(v, 1) }}</span>
+  {%- elif unit == 'B$' -%}{% if v >= 1 %}{{ tn(v, 1) }} Mr${% else %}{{ tn(v * 1000, 0) }} M${% endif %}
+  {%- elif unit == 'M$' -%}{% if v >= 1000 %}{{ tn(v / 1000, 1) }} Mr${% else %}{{ tn(v, 1) }} M${% endif %}
+  {%- elif unit == 'x' -%}{{ tn(v, 1) }}×
+  {%- elif unit == '$' -%}{{ tn(v, 2) }}
+  {%- elif unit == 'r' -%}{{ tn(v, 2) }}
+  {%- else -%}{{ tn(v, 1 if v < 10 and v != v|int else 0) }}{%- endif -%}
+{%- endmacro %}
+{% macro th(k, label) -%}<th class="num"><a href="{{ sort_url(k) }}" style="color:inherit">{{ label }}{% if sort_key == k %} {{ '▼' if desc else '▲' }}{% endif %}</a></th>{%- endmacro %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Hisse tarayıcı</h1>
+    <div class="stamp">{% if run %}{{ tn(total, 0) }} ABD hissesi · fiyatlar {{ run.price_day|trdate }} kapanışı · finansallar SEC'e verilen son çeyrek raporları, SEC'te eksikse Yahoo ({{ tn(run.with_fund, 0) }} şirket{% if run.with_yahoo %}, {{ tn(run.with_yahoo, 0) }}'i Yahoo'dan{% endif %}) · bilanço tarihleri Finnhub{% else %}henüz veri yok{% endif %}
+      {% if age is not none and age > 3 %}<span class="badge warn">veri {{ age }} günlük</span>{% endif %}</div>
+  </div>
+  <form method="post" action="/tarayici/run">{% if running %}<button disabled>Yenileniyor…</button>{% else %}<button class="secondary">Veriyi yenile</button>{% endif %}</form>
+</div>
+{% if running %}<meta http-equiv="refresh" content="20">{% endif %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+
+{% if not run %}
+<div class="panel empty-state"><h3>Tarama verisi henüz yok</h3>
+  <p class="muted">Gece işi her gün ABD kapanışından sonra çalışır. Hemen başlatmak için “Veriyi yenile” ya da sunucuda <code>borsa-radar tara run</code>. İlk çalıştırma bütün hisselerin fiyatlarını indirdiği için uzun sürer.</p></div>
+{% else %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Hazır taramalar</h2><span class="stamp"><span class="src">bir tıkla filtre; ardından istediğin gibi değiştir</span></span></div>
+  <div class="chips">
+    {% for code, p in presets.items() %}<a class="chip {{ 'pos' if preset_code == code else '' }}" href="/tarayici?preset={{ code }}" title="{{ p.what }}">{{ p.name }}{% if p.measured %} ✓{% endif %}</a>{% endfor %}
+    {% if raw %}<a class="chip" href="/tarayici">✕ temizle</a>{% endif %}
+  </div>
+  {% if preset %}<div class="small" style="margin-top:8px"><b>{{ preset.name }}:</b> {{ preset.what }}
+    {% if preset.measured %}<span class="badge pos">geçmişte ölçüldü</span> <a href="/fikirler">sonuçlar →</a>{% else %}<span class="badge warn">test edilmedi</span>{% endif %}</div>{% endif %}
+  {% if saved %}<div class="small" style="margin-top:8px"><b>Kayıtlı taramaların:</b>
+    {% for s in saved %}<a class="chip" href="/tarayici?{{ s.query }}">{{ s.name }}</a><form class="inline" method="post" action="/tarayici/sil/{{ s.id }}"><button class="sm" title="sil" style="padding:0 5px">✕</button></form> {% endfor %}</div>{% endif %}
+</section>
+
+<section class="panel hsec">
+  <details class="more" {% if active %}open{% endif %}><summary><b>Filtreler</b>{% if active %} · {{ active|length }} etkin{% endif %}</summary>
+  <form method="get" action="/tarayici" id="flt">
+    {% if preset_code %}<input type="hidden" name="preset" value="{{ preset_code }}">{% endif %}
+    <div class="filters" style="margin-top:8px">
+      <input name="q" value="{{ flt.q or '' }}" placeholder="Sembol, şirket ya da sektör alt grubu ara" style="min-width:240px">
+      <select name="sector"><option value="">Tüm sektörler</option>{% for s in sectors %}<option value="{{ s }}" {{ 'selected' if flt.sector == s }}>{{ s }}</option>{% endfor %}</select>
+      <select name="trend"><option value="">Trend: hepsi</option>{% for k, v in trend_tr.items() %}<option value="{{ k }}" {{ 'selected' if flt.trend == k }}>{{ v }}</option>{% endfor %}</select>
+      <select name="profit"><option value="">Kârlılık: hepsi</option>{% for k, v in profit_tr.items() %}<option value="{{ k }}" {{ 'selected' if flt.profit == k }}>{{ v }}</option>{% endfor %}</select>
+      <select name="earn"><option value="">Bilanço: farketmez</option>{% for k, v in earn_tr.items() %}<option value="{{ k }}" {{ 'selected' if flt.earn == k }}>Bilanço {{ v }}</option>{% endfor %}</select>
+      <select name="rule"><option value="">Fikir listesi kuralı: yok</option>{% for code, s in screens.items() %}<option value="{{ code }}" {{ 'selected' if flt.rule == code }}>{{ s.name }}</option>{% endfor %}</select>
+      <label class="small"><input type="checkbox" name="accel" value="1" {{ 'checked' if flt.accel }}> büyüme hızlanıyor</label>
+      <label class="small"><input type="checkbox" name="noadr" value="1" {{ 'checked' if flt.noadr }}> yabancı (ADR) hariç</label>
+    </div>
+    {% for g in groups %}
+    <div class="ph" style="margin-top:6px">{{ g }}</div>
+    <div class="filters">
+      {% for f in fields if f.group == g %}
+      <span class="small" title="{{ f.hint }}" style="white-space:nowrap">{{ f.label }}{% if f.unit and f.unit not in ('x', '') %} ({{ f.unit }}){% endif %}
+        <input name="{{ f.key }}_min" value="{{ flt[f.key ~ '_min'] or '' }}" placeholder="en az" inputmode="decimal" style="width:62px">
+        <input name="{{ f.key }}_max" value="{{ flt[f.key ~ '_max'] or '' }}" placeholder="en çok" inputmode="decimal" style="width:62px"></span>
+      {% endfor %}
+    </div>
+    {% endfor %}
+    <div class="filters" style="margin-top:8px"><button>Tara</button> <a href="/tarayici" class="small">temizle</a>
+      <span class="xs muted">Yüzdeler yüzde olarak yazılır: gelir büyümesi en az 20 → <code>20</code>. Piyasa değeri milyar $: 2 → 2 milyar $.</span></div>
+  </form>
+  </details>
+</section>
+
+<section class="panel hsec" id="sonuc">
+  <div class="sec-head"><h2>{{ tn(n_hits, 0) }} hisse</h2>
+    <span class="stamp">{% if n_hits > show %}ilk {{ show }} gösteriliyor · {% endif %}<a href="/tarayici.csv?{{ qs }}">CSV indir</a>
+      {% if active %} · <form class="inline" method="post" action="/tarayici/kaydet"><input type="hidden" name="query" value="{{ qs }}"><input name="name" placeholder="bu taramaya ad ver" required style="width:150px"> <button class="sm">Kaydet</button></form>{% endif %}</span></div>
+  {% set shown = ['symbol', 'price', 'chg1', 'mcap', 'rev_yoy', 'nm', 'ps', 'pe', 'fscore', 'r6m', 'rs6', 'off_hi', 'rsi', 'beta', 'pcorr', 'earn'] %}
+  {% if hits %}<div class="table-scroll"><table class="compact">
+    <tr><th><a href="{{ sort_url('symbol') }}" style="color:inherit">Hisse</a></th><th>Şirket</th>{{ th('price', 'Fiyat') }}{{ th('chg1', 'Gün') }}{{ th('mcap', 'Piy. değeri') }}
+      {{ th('rev_yoy', 'Gelir büy.') }}{{ th('nm', 'Net marj') }}{{ th('ps', 'F/S') }}{{ th('pe', 'F/K') }}{{ th('fscore', 'F-skor') }}
+      {{ th('r6m', '6 ay') }}{{ th('rs6', "S&P'ye göre") }}{{ th('off_hi', 'Zirveye') }}{{ th('rsi', 'RSI') }}{{ th('beta', 'Beta') }}{{ th('pcorr', 'Portf. kor.') }}<th>Trend</th>{{ th('earn', 'Bilanço') }}
+      {% if sort_key not in shown and field[sort_key] is defined %}{{ th(sort_key, field[sort_key].label) }}{% endif %}<th></th></tr>
+    {% for r in hits %}<tr>
+      <td><a href="/h/{{ r.symbol }}"><b>{{ r.symbol }}</b></a></td>
+      <td class="small" style="max-width:260px">{{ r.name }}<div class="xs muted">{{ r.industry or r.sector or '' }}{% if r.adr %} · ADR{% endif %}{% if r.src == 'yahoo' %} · <span title="Bu şirketin son çeyrekleri SEC verisinde yok; gelir tablosu Yahoo'dan">finansal: Yahoo</span>{% endif %}{% for c in r.rules or [] %} <span class="badge {{ 'pos' if c in ('kara_yakin', 'ilk_kar') else '' }}">{{ screens[c].name }}</span>{% endfor %}</div></td>
+      <td class="num">{{ fv(r.price, '$') }}</td><td class="num">{{ fv(r.chg1, '%') }}</td><td class="num">{{ fv(r.mcap, 'B$') }}</td>
+      <td class="num">{{ fv(r.rev_yoy, '%') }}{% if r.accel %} <span title="büyüme hızlanıyor">↗</span>{% endif %}</td><td class="num">{{ fv(r.nm, '%') }}</td>
+      <td class="num">{{ fv(r.ps, 'x') }}</td><td class="num">{{ fv(r.pe, 'x') }}</td><td class="num">{{ r.fscore if r.fscore is not none else '—' }}</td>
+      <td class="num">{{ fv(r.r6m, '%') }}</td><td class="num">{{ fv(r.rs6, '%') }}</td><td class="num">{{ fv(r.off_hi, '%') }}</td>
+      <td class="num {{ 'pos' if r.rsi is not none and r.rsi < 30 else ('neg' if r.rsi is not none and r.rsi > 70 else '') }}">{{ tn(r.rsi, 0) if r.rsi is not none else '—' }}</td>
+      {% set pc = r.get('pcorr') %}<td class="num">{{ fv(r.get('beta'), 'r') }}</td>
+      <td class="num {{ 'neg' if pc is not none and pc >= 0.5 else ('pos' if pc is not none and pc <= 0.1 else '') }}">{{ fv(pc, 'r') }}</td>
+      <td class="xs">{{ {'guclu': '▲▲ güçlü', 'yukari': '▲ yukarı', 'asagi': '▼ aşağı'}.get(r.trend, '—') }}</td>
+      <td class="xs">{% if r.earn %}{{ r.earn|trdate }}{% if r.earn_t == 'bmo' %} açılış önc.{% elif r.earn_t == 'amc' %} kapanış son.{% endif %}{% else %}—{% endif %}</td>
+      {% if sort_key not in shown and field[sort_key] is defined %}<td class="num"><b>{{ fv(r[sort_key], field[sort_key].unit) }}</b></td>{% endif %}
+      <td><form class="inline" method="post" action="/tarayici/izle"><input type="hidden" name="symbol" value="{{ r.symbol }}"><input type="hidden" name="back" value="{{ qs }}"><button class="sm" title="İzleme listeme ekle">İzle</button></form></td>
+    </tr>{% endfor %}
+  </table></div>
+  {% else %}<div class="muted small">Bu filtrelere uyan hisse yok. Bir filtreyi gevşetmeyi dene.</div>{% endif %}
+</section>
+
+<details class="explain"><summary>Bu tarayıcı nasıl çalışıyor, nelere dikkat etmeliyim?</summary>
+  <p><b>Evren:</b> NYSE, Nasdaq ve NYSE American'da işlem gören bütün adi hisseler (yabancı ADR'ler dahil). SPAC kabukları, varantlar ve günlük işlem hacmi 250 bin $'ın altındaki hisseler hariç. Liste Sharadar'ın ücretsiz şirket tablosundan gelir.</p>
+  <p><b>Beta ve portföy korelasyonu:</b> Beta, hissenin son 1 yıldaki günlük getirilerinin S&amp;P 500'e (SPY) göre ne kadar oynadığıdır: 1 = piyasa kadar, 0,5 = yarısı kadar, eksi = ters yönde. Portföy korelasyonu, aynı günlerde hissenin bugünkü portföyünle (bugünkü ağırlıklarla) birlikte hareket edip etmediğini gösterir: 0,5 ve üstü kırmızı (portföyle birlikte düşer), 0,1 ve altı yeşil (büyük ölçüde bağımsız).{% if run and run.port %} Hesaplanan portföy: {{ run.port.n }} hisse ({{ run.port.symbols[:6]|join(', ') }}{% if run.port.n > 6 %} …{% endif %}), {{ run.port.day|trdate }}.{% endif %} Portföy betası ağırlıklı ortalamadır: düşük betalı bir hisse eklemek betayı ancak eklenen tutar oranında düşürür. Bunlar geçmiş ölçümlerdir ve değişir; alım önerisi değildir.</p>
+  <p><b>Veri:</b> Fiyatlar Yahoo'nun günlük kapanışları; her gece ABD kapanışından sonra yenilenir. Finansallar şirketlerin SEC'e verdiği son çeyrek raporlarından (10-Q/10-K) hesaplanır. SEC'in veri servisinde son çeyrekleri eksik olan şirketlerde (2026'da bazı elektrik şirketleri, bankalar, gayrimenkul fonları, Booking, Costco) Yahoo'nun çeyreklik gelir tablosu kullanılır ve satırda "finansal: Yahoo" yazar; bunlarda bilanço olmadığı için F-skoru ve fikir kuralları boş kalır. Yabancı şirketler (ADR) SEC'e çeyreklik rapor vermez ve kendi para birimleriyle raporlar, bu yüzden onlarda finansal sütunlar boş kalır. Piyasa değeri = fiyat × rapordaki hisse sayısı. SEC verisinde hisse sayısı olmayan şirketlerde (çoğu birden çok hisse sınıfı olanlar: GOOGL, META, V, BRK-B) Yahoo'daki son çeyreğin ortalama seyreltilmiş hisse sayısı kullanılır; bu yüzden onlarda piyasa değeri, F/S ve F/K yaklaşıktır.</p>
+  <p><b>Tanımlar:</b> Gelir ve kâr büyümesi son çeyreğin geçen yılın aynı çeyreğine göre değişimidir. Marjlar ve F/K son dört çeyrek toplamından hesaplanır. F-skoru, Piotroski'nin finansal iyileşme testlerinden yedisidir (kâr, varlık getirisi, borçluluk, likidite, seyrelme, brüt marj, varlık devir hızı). "S&amp;P'ye göre", 6 aylık getirinin S&amp;P 500'ün 6 aylık getirisinden farkıdır (puan).</p>
+  <p><b>Ölçülmüş mü?</b> Hazır taramalardan yalnız ✓ işaretli olanların (fikir listesi kuralları) geçmiş performansı ölçüldü; ayrıntılar <a href="/fikirler">Fikir listesi</a> sayfasında. Diğer filtreler araştırma için kısa liste çıkarır; bir filtrenin hisse seçtirmesi, o hissenin iyi bir yatırım olduğunu göstermez.</p>
+</details>
+{% endif %}
+<div class="xs muted" style="margin:10px 0">Bu sayfa kişisel araştırma içindir, yatırım tavsiyesi değildir.</div>
+{% endblock %}

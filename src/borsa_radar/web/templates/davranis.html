@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+{% block title %}İşlem davranışı · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% macro small(n, note) %}{% if note %} <span class="chip warn xs" title="20'den az işlem: sonuç tesadüf olabilir">küçük örneklem · n={{ n }}</span>{% endif %}{% endmacro %}
+{% macro srow(label, s) %}<tr>
+  <td>{{ label }}{{ small(s.n, s.note) }}</td><td class="num">{{ s.n }}</td>
+  <td class="num">{% if s.hit is not none %}%{{ tn(s.hit, 0) }}{% else %}—{% endif %}</td>
+  <td class="num {{ s.exp|sgn }}">{{ s.exp|susd }}</td><td class="num {{ s.exp_pct|sgn }}">{{ tp(s.exp_pct) }}</td>
+  <td class="num {{ s.sum|sgn }}">{{ s.sum|susd }}</td></tr>{% endmacro %}
+{% block content %}
+<style>
+.bh-find { margin-bottom: 8px; }
+.bh-find h3 { margin: 0 0 4px; font-size: 14.5px; display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; }
+.bh-find .q { margin-top: 6px; font-size: 13px; color: #c4b5fd; }
+.bh-find .q b { color: var(--muted); font-weight: 600; }
+.bh-note { font-size: 12.5px; color: var(--muted); margin: 4px 0 12px; }
+.bh-two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 14px; }
+.bh-two > .panel { margin: 0; }
+@media (max-width: 900px) { .bh-two { grid-template-columns: 1fr; } }
+.bh-months { max-height: 420px; overflow-y: auto; }
+.bh-bar { display: flex; align-items: center; gap: 4px; min-width: 90px; }
+.bh-bar span { display: block; height: 6px; border-radius: 3px; }
+.bh-bar .p { background: var(--pos); } .bh-bar .n { background: var(--neg); }
+</style>
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">İşlem davranışı</h1>
+    {% if r and not r.empty %}<p class="lede">{{ r.summary|trnum }}</p>{% endif %}
+  </div>
+  {% if r and not r.empty %}<div class="stamp">T = <b>{{ r.as_of }}</b> kapanışı · kapanan işlemler {{ r.first_close|trdate }} → {{ r.last_close|trdate }}
+    {% for s in r.sources %}<span class="src">{{ s }}</span>{% endfor %}</div>{% endif %}
+</div>
+{% if not r or r.empty %}<div class="empty">Kapanan işlem yok; davranış analizi için en az bir tam alım-satım turu gerekir.</div>{% else %}
+<p class="bh-note">Bu sayfa geçmiş işlemlerinin <b>süreç</b> analizidir: hangi alışkanlık sonuçla birlikte gidiyor, hangi soruyu kendine sormaya değer. Alım/satım önerisi değildir; korelasyon nedensellik değildir. 20'den az işleme dayanan sonuçlar “küçük örneklem” diye işaretlenir.</p>
+
+{% set o = r.overall %}
+<div class="tiles">
+  <div class="tile"><div class="lbl">Kapanan işlem</div><div class="val">{{ o.n }}</div>
+    <div class="sub muted">{{ o.wins }} kâr · {{ o.losses }} zarar/başa baş</div></div>
+  <div class="tile"><div class="lbl">İsabet oranı</div><div class="val">%{{ tn(o.hit, 0) }}</div>
+    <div class="sub muted">medyan elde tutma {{ tn(o.median_days, 0) }} gün</div></div>
+  <div class="tile"><div class="lbl">Ort. kazanç / kayıp</div><div class="val"><span class="pos">{{ o.avg_win|susd }}</span> <span class="small muted">/</span> <span class="neg">{{ o.avg_loss|susd }}</span></div>
+    <div class="sub muted">{{ tp(o.avg_win_pct) }} / {{ tp(o.avg_loss_pct) }}</div></div>
+  <div class="tile"><div class="lbl">Kazanç/kayıp oranı</div><div class="val">{{ tn(o.payoff) }}</div>
+    <div class="sub muted">ort. kazanç ÷ ort. kayıp</div></div>
+  <div class="tile"><div class="lbl">Kâr faktörü</div><div class="val {{ 'pos' if o.profit_factor and o.profit_factor > 1 else 'neg' }}">{{ tn(o.profit_factor) }}</div>
+    <div class="sub muted">brüt kâr {{ o.gross_win|usd }} ÷ brüt zarar {{ (-o.gross_loss)|usd }}</div></div>
+  <div class="tile"><div class="lbl">İşlem başı beklenti</div><div class="val {{ o.exp|sgn }}">{{ o.exp|susd }}</div>
+    <div class="sub muted">{{ tp(o.exp_pct) }} (eşit ağırlık) · toplam {{ o.sum|susd }}</div></div>
+</div>
+{{ simple("İsabet oranı: kârla kapanan işlemlerin payı. Kazanç/kayıp oranı: ortalama kârlı işlemin ortalama zararlı işleme göre kaç kat büyük olduğu; 1'in üstündeyse isabet %50'nin altında olsa da toplamda kazanılabilir. Kâr faktörü: tüm kârların toplamı ÷ tüm zararların toplamı; 1'in üstü toplamda kâr demek. Beklenti: geçmişe göre ortalama bir işlemin getirdiği tutar. Yüzdeler her işleme eşit ağırlık verir; dolar tutarları büyük işlemlerden daha çok etkilenir.") }}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Örüntüler ve sorular</h2><span class="stamp">kural tabanlı · {{ r.findings|length }} bulgu · {{ r.as_of }}</span></div>
+  {% for f in r.findings %}<div class="result bh-find {{ 'neg' if f.tone == 'warn' else 'pos' if f.tone == 'ok' else 'neu' }}">
+    <h3>{{ f.title }} <span class="xs muted">n={{ f.n }}</span>{{ small(f.n, f.note) }}</h3>
+    <div class="small">{{ f.text|trnum }}</div>
+    <div class="q"><b>Kendine sor:</b> {{ f.question }}</div>
+  </div>{% endfor %}
+  {{ simple("Kırmızı çizgi: o alışkanlığa sahip işlemler diğerlerinden belirgin biçimde (en az 10$ ve %25) kötü sonuçlanmış. Yeşil: örüntü görünmüyor ya da tersine iyi sonuçlanmış. Gri: bilgi. Her bulgu kaç işleme dayandığını (n) gösterir; az sayıda işlem tesadüfe açıktır. Sorular karar vermek için değil, bir sonraki işlemden önce kendi sürecini gözden geçirmek için.") }}
+</section>
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Elde tutma süresine göre</h2><span class="stamp">açılış → kapanış takvim günü</span></div>
+  {% set mx = r.holding|map(attribute='sum')|map('abs')|max %}
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Süre</th><th class="num">İşlem</th><th class="num">İsabet</th><th class="num">Beklenti</th><th class="num">Beklenti %</th><th class="num">Toplam</th><th></th></tr>
+    {% for b in r.holding %}<tr>
+      <td>{{ b.label }}{{ small(b.n, b.note) }}</td><td class="num">{{ b.n }}</td>
+      <td class="num">{% if b.hit is not none %}%{{ tn(b.hit, 0) }}{% else %}—{% endif %}</td>
+      <td class="num {{ b.exp|sgn }}">{{ b.exp|susd }}</td><td class="num {{ b.exp_pct|sgn }}">{{ tp(b.exp_pct) }}</td>
+      <td class="num {{ b.sum|sgn }}"><b>{{ b.sum|susd }}</b></td>
+      <td>{% if mx %}<div class="hbar {{ 'neg' if b.sum < 0 }}" style="min-width:80px"><span style="width:{{ (b.sum|abs / mx * 100)|round(1) }}%"></span></div>{% endif %}</td>
+    </tr>{% endfor %}
+  </table></div>
+  {{ simple("İşlemleri ne kadar süre tuttuğuna göre gruplar. Hangi sürede daha iyi sonuç aldığını gösterir; kısa işlemler genelde daha çok karar ve daha çok gürültü demektir.") }}
+</section>
+
+<div class="bh-two">
+<section class="panel hsec">
+  {% set d = r.disposition %}
+  <div class="sec-head"><h2>Kaybedeni tutma eğilimi</h2><span class="stamp">medyan gün</span></div>
+  <div class="tiles" style="grid-template-columns:1fr 1fr">
+    <div class="tile"><div class="lbl">Kazananlar</div><div class="val pos">{{ tn(d.median_win_days, 0) }} gün</div><div class="sub muted">n={{ d.n_win }}</div></div>
+    <div class="tile"><div class="lbl">Kaybedenler</div><div class="val neg">{{ tn(d.median_loss_days, 0) }} gün</div><div class="sub muted">n={{ d.n_loss }}</div></div>
+  </div>
+  {% if d.open_held_long %}<h3 class="small" style="margin:12px 0 4px">Zararda ve tipik kaybedenden ({{ tn(d.median_loss_days, 0) }} gün) uzun süredir açık</h3>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Sembol</th><th class="num">Gün</th><th class="num">Kâr/zarar</th><th class="num">Ağırlık</th><th></th></tr>
+    {% for x in d.open_held_long %}<tr><td><a href="/h/{{ x.symbol }}"><b>{{ x.symbol }}</b></a></td><td class="num">{{ x.days }}</td>
+      <td class="num neg">{{ tp(x.unreal_pct) }} <span class="xs muted">{{ x.unreal|susd }}</span></td><td class="num">%{{ tn(x.weight, 1) }}</td>
+      <td><a class="small" href="/tez?symbol={{ x.symbol }}">Tez →</a></td></tr>{% endfor %}
+  </table></div>{% else %}<p class="small muted">Tipik kaybeden süresini aşan zarardaki açık pozisyon yok.</p>{% endif %}
+  {{ simple("Yatırımcılar çoğu zaman kârdaki hisseyi erken satıp zarardakini 'geri gelsin' diye uzun tutar (elden çıkarma etkisi). Kaybedenlerin medyan süresi kazananlardan belirgin uzunsa bu örüntü vardır. Listedeki açık pozisyonlar bir uyarı değil, tezini yeniden okumak için bir hatırlatmadır.") }}
+</section>
+
+<section class="panel hsec">
+  {% set pl = r.post_loss %}
+  <div class="sec-head"><h2>Zarardan hemen sonra</h2><span class="stamp">zararlı kapanıştan sonraki {{ pl.window }} takvim günü içinde açılan</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th></th><th class="num">İşlem</th><th class="num">İsabet</th><th class="num">Beklenti</th><th class="num">%</th><th class="num">Toplam</th></tr>
+    {{ srow("Zarardan sonra", pl.after) }}{{ srow("Diğerleri", pl.base) }}
+  </table></div>
+  <p class="small" style="margin:8px 0">Medyan maliyet: zarardan sonra {{ pl.median_cost_after|usd }} · tüm işlemler {{ pl.median_cost_all|usd }}{% if pl.cost_ratio %} ({{ tn(pl.cost_ratio) }}×){% endif %}
+    {% if pl.median_size_after is not none %}<br>Portföye oranla medyan büyüklük: zarardan sonra %{{ tn(pl.median_size_after, 1) }} · diğerleri %{{ tn(pl.median_size_base, 1) }}{% endif %}
+    {% if pl.same_symbol %}<br>{{ pl.same_symbol }} işlem aynı hisseye hemen geri dönüş.{% endif %}</p>
+  {% if pl.trips %}<details><summary class="small">Bu işlemler ({{ pl.trips|length }})</summary>
+    <div class="table-scroll"><table class="compact">
+      <tr><th>Sembol</th><th>Açılış</th><th>Kapanış</th><th class="num">Sonuç</th></tr>
+      {% for t in pl.trips %}<tr><td><a href="/h/{{ t.symbol }}">{{ t.symbol }}</a></td><td class="small">{{ t.open }}</td><td class="small">{{ t.close }}</td>
+        <td class="num {{ t.realized|sgn }}">{{ t.realized|susd }} <span class="xs">{{ tp(t.pct) }}</span></td></tr>{% endfor %}
+    </table></div></details>{% endif %}
+  {{ simple("Zararla kapanan bir işlemin hemen ardından açılan işlemler, kaybı hızla telafi etme isteğiyle ('intikam işlemi') alınmış olabilir. Bu işlemler diğerlerinden belirgin kötüyse, zarardan sonra kısa bir bekleme kuralı düşünmeye değer. Not: zararlar genelde piyasanın zayıf dönemlerinde kümelenir, yani sonuç kısmen piyasadan da gelebilir.") }}
+</section>
+</div>
+
+<section class="panel hsec" style="margin-top:14px">
+  <div class="sec-head"><h2>Pozisyona ekleme</h2><span class="stamp">ekleme: ortalama maliyetin %2 altında (düşüşte) veya %2 üstünde (yükselişte) alım</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th></th><th class="num">İşlem</th><th class="num">İsabet</th><th class="num">Beklenti</th><th class="num">%</th><th class="num">Toplam</th></tr>
+    {{ srow("Düşüşte ekleme yapılan (ortalama düşürme)", r.avg_down.yes) }}{{ srow("Düşüşte ekleme yok", r.avg_down.no) }}
+    <tr><td colspan="6" style="padding:2px"></td></tr>
+    {{ srow("Yükselişte ekleme yapılan", r.add_up.yes) }}{{ srow("Yükselişte ekleme yok", r.add_up.no) }}
+  </table></div>
+  <p class="xs muted" style="margin:6px 0 0">Toplam {{ r.avg_down.events }} düşüşte ve {{ r.add_up.events }} yükselişte ekleme. Bir işlem iki grupta birden olabilir.</p>
+  {{ simple("Ortalama düşürme: hisse düştükçe daha fazla almak. Bazen işe yarar, ama kaybeden pozisyonu büyütme riski taşır. Yükselişte ekleme: kazanan pozisyonu büyütmek. Tablo bu alışkanlıkların geçmişte hangi sonuçla birlikte gittiğini gösterir; bir kural değil, bir aynadır.") }}
+</section>
+
+<section class="panel hsec">
+  {% set ae = r.after_exit %}
+  <div class="sec-head"><h2>Satıştan sonra fiyat</h2><span class="stamp">satış fiyatına göre {{ ae.horizons|join(' ve ') }} işlem günü sonraki kapanış</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th></th>{% for h in ae.horizons %}<th class="num">{{ h }} gün · medyan</th><th class="num">yukarıda olan</th><th class="num">n</th>{% endfor %}</tr>
+    {% for g, label in [('win', 'Kârla satılanlar'), ('loss', 'Zararla satılanlar')] %}<tr><td>{{ label }}</td>
+      {% for h in ae.horizons %}{% set x = ae.groups[g][h] %}<td class="num {{ x.median|sgn }}"><b>{{ tp(x.median) }}</b></td>
+        <td class="num">{% if x.up_share is not none %}%{{ tn(x.up_share, 0) }}{% else %}—{% endif %}</td><td class="num">{{ x.n }}{{ small(x.n, x.note) }}</td>{% endfor %}</tr>{% endfor %}
+  </table></div>
+  <p class="xs muted" style="margin:6px 0 0">Sonrası için yeterli veri olmayan işlemler atlandı: {% for h in ae.horizons %}{{ h }} gün → {{ ae.skipped[h] }}{% if not loop.last %} · {% endif %}{% endfor %}.</p>
+  <div class="bh-two" style="margin-top:10px">
+    <div><h3 class="small" style="margin:0 0 4px">Kârla satıldı, sonra en çok yükselenler ({{ ae.horizons[0] }} gün)</h3>
+      <table class="compact">{% for x in ae.early_exits %}<tr><td><a href="/h/{{ x.symbol }}">{{ x.symbol }}</a> <span class="xs muted">{{ x.close }}</span></td>
+        <td class="num">{{ x.exit_px|usd2 }}</td><td class="num {{ x['d' ~ ae.horizons[0]]|sgn }}">{{ tp(x['d' ~ ae.horizons[0]]) }}</td></tr>{% else %}<tr><td class="muted small">yok</td></tr>{% endfor %}</table></div>
+    <div><h3 class="small" style="margin:0 0 4px">Zararla satıldı, sonra en çok toparlayanlar ({{ ae.horizons[0] }} gün)</h3>
+      <table class="compact">{% for x in ae.recovered %}<tr><td><a href="/h/{{ x.symbol }}">{{ x.symbol }}</a> <span class="xs muted">{{ x.close }}</span></td>
+        <td class="num">{{ x.exit_px|usd2 }}</td><td class="num {{ x['d' ~ ae.horizons[0]]|sgn }}">{{ tp(x['d' ~ ae.horizons[0]]) }}</td></tr>{% else %}<tr><td class="muted small">yok</td></tr>{% endfor %}</table></div>
+  </div>
+  {{ simple("Sattıktan sonra hisse ne yaptı? Kârla sattıkların sonradan çoğunlukla yükseliyorsa kazananları erken satıyor olabilirsin; zararla sattıkların çoğunlukla toparlanıyorsa panikle ya da dipte satıyor olabilirsin. Medyan sıfır civarındaysa çıkışların zamanlaması rastgeleden kötü değil demektir. Karşılaştırma satış fiyatıyla (işlem fiyatı) yapılır, gün sonu kapanışıyla değil.") }}
+</section>
+
+<div class="bh-two">
+<section class="panel hsec">
+  {% set sz = r.sizing %}
+  <div class="sec-head"><h2>Pozisyon büyüklüğü</h2><span class="stamp">portföy değerine oranla · eşik %{{ tn(sz.flag, 0) }}</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th></th><th class="num">İşlem</th><th class="num">İsabet</th><th class="num">Beklenti</th><th class="num">%</th><th class="num">Toplam</th></tr>
+    {{ srow("%" ~ tn(sz.flag, 0) ~ " üstü", sz.big) }}{{ srow("Diğerleri", sz.rest) }}
+  </table></div>
+  <table class="compact" style="margin-top:8px"><tr><th>Yıl</th><th class="num">İşlem</th><th class="num">Medyan büyüklük</th><th class="num">%{{ tn(sz.flag, 0) }} üstü</th></tr>
+    {% for y in sz.by_year %}<tr><td>{{ y.year }}</td><td class="num">{{ y.n }}</td><td class="num">%{{ tn(y.median, 1) }}</td><td class="num {{ 'neg' if y.over }}">{{ y.over }}</td></tr>{% endfor %}</table>
+  {% if sz.flagged %}<details style="margin-top:8px"><summary class="small">Eşiği aşan işlemler ({{ sz.flagged|length }})</summary>
+    <table class="compact">{% for x in sz.flagged %}<tr><td><a href="/h/{{ x.symbol }}">{{ x.symbol }}</a> <span class="xs muted">{{ x.open }}</span></td>
+      <td class="num">%{{ tn(x.size_pct, 0) }} <span class="xs muted">{{ x.basis }}</span></td><td class="num {{ x.realized|sgn }}">{{ x.realized|susd }}</td></tr>{% endfor %}</table></details>{% endif %}
+  {{ simple("Tek alımla açılan işlemde büyüklük = alım tutarı ÷ o günkü portföy değeri. Kademeli alınan işlemde = pozisyonun ulaştığı en yüksek maliyet ÷ işlem süresince portföyün en yüksek değeri; gerçek oran bundan büyük olabilir (alt sınır). Portföy küçükken (ilk aylar) her işlem doğal olarak büyük bir pay tutar; yıllara göre tablo bunu ayırt etmeye yarar.") }}
+</section>
+
+<section class="panel hsec">
+  {% set bs = r.by_symbol %}
+  <div class="sec-head"><h2>Hisseye göre katkı</h2><span class="stamp">{{ bs.n_symbols }} farklı hisse · gerçekleşen $</span></div>
+  {% set mx2 = ((bs.top + bs.bottom)|map(attribute='realized')|map('abs')|max) if (bs.top or bs.bottom) else 0 %}
+  <table class="compact">
+    <tr><th>En çok kazandıran</th><th class="num">İşlem</th><th class="num">Toplam</th></tr>
+    {% for x in bs.top %}<tr><td><a href="/h/{{ x.symbol }}"><b>{{ x.symbol }}</b></a><div class="hbar"><span style="width:{{ (x.realized|abs / mx2 * 100)|round(1) }}%"></span></div></td>
+      <td class="num">{{ x.n }}</td><td class="num pos">{{ x.realized|susd }}</td></tr>{% endfor %}
+    <tr><th>En çok kaybettiren</th><th></th><th></th></tr>
+    {% for x in bs.bottom %}<tr><td><a href="/h/{{ x.symbol }}"><b>{{ x.symbol }}</b></a><div class="hbar neg"><span style="width:{{ (x.realized|abs / mx2 * 100)|round(1) }}%"></span></div></td>
+      <td class="num">{{ x.n }}</td><td class="num neg">{{ x.realized|susd }}</td></tr>{% endfor %}
+  </table>
+  {% if bs.repeat %}<p class="xs muted" style="margin:8px 0 0">En az 3 kez girilen: {% for x in bs.repeat %}{{ x.symbol }} ({{ x.n }} işlem, {{ x.realized|susd }}){% if not loop.last %} · {% endif %}{% endfor %}</p>{% endif %}
+  {{ simple("Toplam sonucun hangi hisselerden geldiğini gösterir. Birkaç hisse sonucun çoğunu belirliyorsa, başarı ya da kayıp birkaç karara bağlıdır. Aynı hisseye tekrar tekrar giriliyorsa, her girişin yeni bir tezle mi yoksa alışkanlıkla mı yapıldığına bakmaya değer.") }}
+</section>
+</div>
+
+<section class="panel hsec" style="margin-top:14px">
+  {% set mo = r.monthly %}
+  <div class="sec-head"><h2>Aylara göre</h2><span class="stamp">kapanış ayı · ayda medyan {{ tn(mo.median_n, 0) }} işlem · yoğun ay ≥ {{ tn(mo.threshold, 0) }}</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th></th><th class="num">İşlem</th><th class="num">İsabet</th><th class="num">Beklenti</th><th class="num">%</th><th class="num">Toplam</th></tr>
+    {{ srow("Yoğun aylar (" ~ mo.busy_months|length ~ ")", mo.busy) }}{{ srow("Diğer aylar", mo.calm) }}
+  </table></div>
+  {% set mx3 = mo.rows|map(attribute='realized')|map('abs')|max %}
+  <div class="table-scroll bh-months" style="margin-top:8px"><table class="compact">
+    <tr><th>Ay</th><th class="num">Kapanan</th><th class="num">İsabet</th><th class="num">Gerçekleşen</th><th></th></tr>
+    {% for m in mo.rows|reverse %}<tr><td>{{ m.month }}{% if m.busy %} <span class="chip warn xs">yoğun</span>{% endif %}</td><td class="num">{{ m.n }}</td>
+      <td class="num">%{{ tn(m.hit, 0) }}</td><td class="num {{ m.realized|sgn }}">{{ m.realized|susd }}</td>
+      <td><div class="bh-bar">{% if mx3 %}<span class="{{ 'p' if m.realized >= 0 else 'n' }}" style="width:{{ (m.realized|abs / mx3 * 90)|round(1) }}px"></span>{% endif %}</div></td></tr>{% endfor %}
+  </table></div>
+  {{ simple("Her ay kaç işlem kapattığın ve sonucu. Bir ayda olağandan çok işlem (medyanın iki katı, en az 4) 'yoğun ay' sayılır. Yoğun aylarda sonuç belirgin kötüyse aşırı işlem yapma (overtrading) eğilimi olabilir.") }}
+</section>
+{% endif %}
+{% endblock %}

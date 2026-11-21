@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% from "_macros.html" import event_card, quote_box, cal_list %}
+{% block title %}Makro · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head"><div><h1 style="margin-bottom:2px">Makro gelişmeler</h1><p class="lede">Fed, veri açıklamaları ve düzenlemeler; tahmin piyasası olasılıkları (Kalshi). Rejim ve genişlik için Rejim & Nabız sekmesi.</p></div></div>
+<div class="quotes">
+  {% for sym, label in instruments.items() %}{{ quote_box(sym, quotes.get(sym), label) }}{% endfor %}
+</div>
+{% if kalshi %}<section class="panel kalshi-panel"><h2 style="margin-top:0">Tahmin piyasaları (Kalshi)</h2>
+  {% for g in kalshi %}
+    {% if g.kind == 'categorical' %}<h3>{{ g.label }} <span class="muted" style="font-weight:400;font-size:13px">{{ g.title }} · {{ g.close|local('%d.%m.%Y') }}</span></h3><table class="kalshi-table">
+      {% for item in g['items'] if item.prob >= 0.01 %}<tr><td>{{ item.label }}</td><td><div class="prob-track"><div class="prob-fill" style="width:{{ (item.prob * 100)|round(1) }}%"></div></div></td><td class="num">{{ (item.prob * 100)|round|int }}%</td><td class="num {% if item.delta is not none %}{{ 'pos' if item.delta > 0 else 'neg' if item.delta < 0 else 'neu' }}{% endif %}">{% if item.delta is not none %}{{ '%+.1f'|format(item.delta * 100) }} puan{% endif %}</td></tr>{% endfor %}
+    </table>{% else %}<div class="kalshi-ladder"><b>{{ g.title }}</b> · medyan beklenti ≈ {% if g.median is none %}—{% elif g.series == 'KXPAYROLLS' %}{{ (g.median / 1000)|round|int }}K{% else %}{{ '%.2f'|format(g.median) }}{% endif %}
+      <details><summary>Olasılık dağılımı</summary>{% for item in g['items'] %}<div>{{ item.label }} · {{ (item.prob * 100)|round|int }}%</div>{% endfor %}</details></div>{% endif %}
+  {% endfor %}
+</section>{% endif %}
+<div class="grid">
+  <section>
+    <form class="filters" method="get" action="/macro">
+      <select name="imp" onchange="this.form.submit()">
+        {% for i in [1,2,3,4,5] %}<option value="{{ i }}" {% if imp == i %}selected{% endif %}>önem ≥ {{ i }}</option>{% endfor %}
+      </select>
+      <select name="days" onchange="this.form.submit()">
+        {% for d in [1,3,7,14,30] %}<option value="{{ d }}" {% if days == d %}selected{% endif %}>{{ d }} gün</option>{% endfor %}
+      </select>
+    </form>
+    {% for e in rows %}{{ event_card(e) }}{% else %}<div class="empty">Bu filtrede makro gelişme yok.</div>{% endfor %}
+  </section>
+  <aside>
+    <div class="panel">
+      <h2 style="margin-top:0">Takvim (14 gün)</h2>
+      {{ cal_list(cal) }}
+    </div>
+  </aside>
+</div>
+{% endblock %}

@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Takvim · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head"><div><h1 style="margin-bottom:2px">Takvim</h1><p class="lede">ABD veri açıklamaları, FOMC ve takip ettiğin hisselerin bilanço tarihleri (Berlin saati).</p></div></div>
+<div class="panel">
+<table>
+  <tr><th>Tarih (Berlin)</th><th>Olay</th><th>Önem</th><th>Durum</th></tr>
+  {% for c in cal %}
+  <tr style="{{ 'opacity:.55' if c.release_at < now }}">
+    <td style="white-space:nowrap">{{ c.release_at|local('%a %d.%m.%Y %H:%M') }}</td>
+    <td>{% if c.key.startswith('earnings:') %}📈{% elif c.key == 'fomc' %}🏛️{% else %}📊{% endif %} {{ c.name }}</td>
+    <td>{% if c.importance >= 5 %}🔥{% elif c.importance >= 4 %}⭐{% endif %} {{ c.importance }}</td>
+    <td class="muted">{% if c.event_id %}<a href="/e/{{ c.event_id }}">sonuç →</a>{% elif c.released %}açıklandı{% elif c.reminded %}hatırlatıldı{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+<div class="muted" style="font-size:12px;margin-top:8px">Kaynak: FRED yayın takvimi, federalreserve.gov (FOMC), Finnhub (bilanço). Önem ≥4 olaylar için 30 dk önce Telegram hatırlatması gelir.</div>
+</div>
+{% endblock %}

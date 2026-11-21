@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ sym }} · Karne{% endblock %}
+{% block content %}
+{% if running %}<meta http-equiv="refresh" content="8">{% endif %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">{{ sym }} karnesi</h1>
+    <div class="stamp"><a href="/h/{{ sym }}">← Hisse merkezi</a>
+      {% if card %}· T = <b>{{ card.as_of }}</b> kapanışı ({{ tn(card.price) }}$) · hesaplandı {{ card.created_at|local('%d.%m %H:%M') }} · ağırlık seti {{ card.weights_ver }}{% endif %}</div>
+  </div>
+  <form method="post" action="/h/{{ sym }}/karne/yeni">
+    {% if running %}<button disabled>Hesaplanıyor…</button>{% else %}<button>Yeni Analiz</button>{% endif %}
+  </form>
+</div>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+{% if not card %}
+  <div class="panel empty-state"><h3>Henüz karne yok</h3><p class="muted">“Yeni Analiz” ile ilk karneyi oluştur. Altı boyutun her biri sunucuda hesaplanır, yapay zekâ sadece özet cümlesini yazar.</p></div>
+{% else %}
+<div class="hero">
+  <div class="hero-main karne-score {{ card.tone }}">
+    <div class="lbl">Genel puan</div>
+    <div class="ring" style="--p:{{ card.overall or 0 }}"><b id="overall">{{ (card.overall or 0)|round|int }}</b><span>/100</span></div>
+    <div class="band {{ card.tone }}" id="bandlbl">{{ card.label }}</div>
+    <div class="xs muted" style="margin-top:6px">≥67 güçlü · 45–66 karışık · &lt;45 zayıf</div>
+  </div>
+  <div class="panel">
+    <div class="lbl">Özet</div>
+    <p class="lede" style="margin:6px 0">{{ card.summary }}</p>
+    <div class="xs muted">Özet: {{ card.summary_model }}. Model yalnızca aşağıdaki sayıları kullanabilir; girdide olmayan bir sayı yazarsa metin reddedilir ve şablon cümle kullanılır.</div>
+    {% set fv = card.fair %}
+    <div class="ph" style="margin-top:12px">Adil değer</div>
+    {% if fv.fair %}
+    <div style="display:flex;gap:16px;align-items:baseline;flex-wrap:wrap">
+      <span style="font-size:24px;font-weight:800">{{ tn(fv.fair) }}$</span>
+      <span class="{{ fv.upside|sgn }}">{{ tp(fv.upside) }} potansiyel</span>
+      <span class="chip {{ 'pos' if fv.confidence == 'yüksek' else 'neg' if fv.confidence == 'düşük' else '' }}">güven: {{ fv.confidence }}</span>
+      {% if fv.spread is defined and fv.spread is not none %}<span class="xs muted">yöntemler arası fark %{{ tn(fv.spread, 0) }}</span>{% endif %}
+    </div>
+    <table class="compact" style="margin-top:6px">{% for m in fv.methods %}<tr><td>{{ m.name }}</td><td class="num"><b>{{ tn(m.value) }}$</b></td><td class="small muted">{{ m.how }}</td><td class="xs muted">{{ m.src }}</td></tr>{% endfor %}</table>
+    <div class="xs muted">Adil değer = yöntemlerin medyanı. Güven: tek yöntem veya fark ≥%45 → düşük, ≥%20 → orta. FMP'nin DCF değeri tutarsız olduğu için kullanılmıyor.</div>
+    {% else %}<div class="missing">doğrulanamadı (EPS tahmini veya hedef fiyat yok)</div>{% endif %}
+  </div>
+</div>
+
+<div class="ph-row"><div class="ph">Boyutlar</div>
+  <details class="weights"><summary class="small">Ağırlıkları değiştir</summary>
+    <div class="wgrid">{% for d in card.dims %}<label class="small">{{ d.name }} <input type="range" min="0" max="50" value="{{ d.weight }}" data-k="{{ d.key }}"> <span class="num" data-wv="{{ d.key }}">{{ d.weight }}</span></label>{% endfor %}</div>
+    <div class="xs muted">Sadece bu ekranda yeniden hesaplar; kayıtlı karne ve sicil varsayılan ağırlıklarla tutulur. Veri olmayan boyut dışarıda kalır, ağırlıklar yeniden dağıtılır.</div>
+  </details>
+</div>
+<div class="dims">
+{% for d in card.dims %}
+  <div class="dim panel">
+    <div class="dim-head"><b>{{ d.name }}</b><span class="xs muted">ağırlık {{ d.weight }}</span>
+      <span class="dscore {{ d.tone }}">{{ '—' if d.score is none else d.score|round|int }}</span></div>
+    <div class="meter"><div class="{{ d.tone }}" style="width:{{ d.score or 0 }}%"></div></div>
+    <table class="compact">{% for p in d.parts %}<tr><td class="small">{{ p.label }}</td><td class="num small">{{ p.value }}</td>
+      <td class="num xs muted">{% if p.pts is not none %}{{ ('%+d'|format(p.pts|round|int)) if d.key == 'anomali' else p.pts|round|int }}{% endif %}</td></tr>{% endfor %}
+      {% if d.score is none %}<tr><td class="missing small" colspan="3">doğrulanamadı — bu boyut genel puana katılmadı</td></tr>{% endif %}</table>
+    <details class="explain"><summary>Daha basit anlat</summary><p>{{ d.explain }}</p></details>
+  </div>
+{% endfor %}
+</div>
+
+<div class="grid2" style="margin-top:14px">
+  <div class="panel"><div class="ph">Sicil — karne bandına göre sonraki {{ tr.horizon }} işlem günü (S&P 500'e göre fark)</div>
+    <table class="compact"><tr><th>Bant</th><th class="num">n</th><th class="num">Ort. fark</th><th class="num">İsabet</th></tr>
+    {% for r in tr.rows %}<tr><td><span class="band {{ r.tone }}">{{ r.label }}</span></td><td class="num">{{ r.n }}</td><td class="num {{ r.avg|sgn }}">{{ tp(r.avg) }}</td><td class="num">{{ '—' if r.hit is none else '%' ~ tn(r.hit, 0) }}</td></tr>{% endfor %}</table>
+    {% if tr.n < 20 %}<div class="flash err small" style="margin-top:8px">Örnek küçük (n = {{ tr.n }} &lt; 20): bu oranlar henüz güvenilir değil. Karneler her gün kapanıştan sonra portföy ve izleme listesi için otomatik kaydediliyor; sicil kendiliğinden birikecek.</div>{% endif %}
+    <div class="xs muted" style="margin-top:6px">İsabet: güçlü/karışık bantta S&P'yi geçmesi, zayıf bantta geride kalması. Tüm sembollerin karneleri dahil ({{ tr.cards }} kayıt).</div>
+  </div>
+  <div class="panel"><div class="ph">{{ sym }} karne geçmişi</div>
+    <table class="compact"><tr><th>Tarih</th><th class="num">Fiyat</th><th class="num">Puan</th></tr>
+    {% for r in hist %}<tr><td>{{ r.as_of or (r.created_at|local('%d.%m.%Y')) }}</td><td class="num">{{ tn(r.price) }}</td><td class="num"><span class="band {{ r.tone }}">{{ '—' if r.overall is none else r.overall|round|int }}</span></td></tr>{% endfor %}</table>
+  </div>
+</div>
+<div class="stamp" style="margin-top:10px">Kaynaklar: {% for s in card.sources if s %}<span class="src">{{ s }}</span>{% endfor %}</div>
+{% endif %}
+
+{% if card %}
+<script>
+(() => {
+  const dims = {{ card.dims|tojson }};
+  const band = s => s === null ? ['neu', 'Yetersiz veri'] : s >= 67 ? ['pos', 'Güçlü'] : s >= 45 ? ['warn', 'Karışık'] : ['neg', 'Zayıf'];
+  function recompute() {
+    let tw = 0, sum = 0;
+    document.querySelectorAll('.wgrid input').forEach(i => {
+      const d = dims.find(x => x.key === i.dataset.k); const w = +i.value;
+      document.querySelector(`[data-wv="${i.dataset.k}"]`).textContent = w;
+      if (d.score !== null && w > 0) { tw += w; sum += d.score * w; }
+    });
+    const s = tw ? sum / tw : null;
+    document.getElementById('overall').textContent = s === null ? '—' : Math.round(s);
+    document.querySelector('.ring').style.setProperty('--p', s || 0);
+    const [tone, label] = band(s); const b = document.getElementById('bandlbl');
+    b.className = 'band ' + tone; b.textContent = label;
+    document.querySelector('.karne-score').className = 'hero-main karne-score ' + tone;
+  }
+  document.querySelectorAll('.wgrid input').forEach(i => i.oninput = recompute);
+})();
+</script>
+{% endif %}
+{% endblock %}

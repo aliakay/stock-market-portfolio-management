@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Kapananlar · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1>Kapanan pozisyonlar</h1>
+    <p class="lede muted">Sıfırdan açılıp tamamen satılan her pozisyon bir tur sayılır. Kendi isabet sicilin.</p>
+  </div>
+  <div class="stamp"><a href="/portfolio">← Portföy</a> · <a href="/portfolio/trades">İşlemler</a></div>
+</div>
+
+<div class="tiles four">
+  <div class="tile"><div class="lbl">Kapanan tur</div><div class="val">{{ s.n }}</div><div class="sub muted">{{ s.wins }} kârlı · {{ s.losses }} zararlı</div></div>
+  <div class="tile"><div class="lbl">İsabet</div><div class="val">{{ '%.0f' % s.hit if s.hit is not none else '—' }}%</div>
+    <div class="sub muted">{% if s.n and s.n < 20 %}n={{ s.n }} — küçük örneklem{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Toplam realize</div><div class="val {{ s.realized | sgn }}">{{ s.realized | susd }}</div></div>
+  <div class="tile"><div class="lbl">Ort. kazanç / kayıp</div><div class="val"><span class="pos">{{ s.avg_win | pct }}</span> / <span class="neg">{{ s.avg_loss | pct }}</span></div>
+    <div class="sub muted">{% if s.avg_days %}ort. {{ s.avg_days | round | int }} gün{% endif %}</div></div>
+</div>
+
+<div class="table-scroll">
+<table>
+  <tr><th>Sembol</th><th>Alt</th><th>Açılış</th><th>Kapanış</th><th class="num">Gün</th><th class="num">Alım/satım</th>
+      <th class="num">Maliyet</th><th class="num">Satış geliri</th><th class="num">Realize</th><th class="num">%</th></tr>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/portfolio/trades?symbol={{ r.symbol }}"><b>{{ r.symbol }}</b></a>{% if r.asset != 'stock' %} <span class="badge">{{ r.asset }}</span>{% endif %}</td>
+    <td>{{ r.sub }}</td><td>{{ r.open | trdate }}</td><td>{{ r.close | trdate }}</td>
+    <td class="num">{{ r.days }}</td><td class="num">{{ r.buys }}/{{ r.sells }}</td>
+    <td class="num">{{ r.cost | usd }}</td><td class="num">{{ r.proceeds | usd }}</td>
+    <td class="num {{ r.realized | sgn }}">{{ r.realized | susd }}</td><td class="num {{ r.pct | sgn }}">{{ r.pct | pct }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="10" class="empty">Henüz tamamen kapanmış pozisyon yok.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% endblock %}

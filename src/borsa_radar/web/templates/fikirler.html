@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Fikir listesi · Borsa Radar{% endblock %}
+{% macro size(m) %}{% if m is none %}<span class="badge">boyut ?</span>{% elif m >= 10e9 %}<span class="badge">büyük {{ big(m) }}</span>{% elif m >= 2e9 %}<span class="badge">orta {{ big(m) }}</span>{% else %}<span class="badge warn">küçük {{ big(m) }}</span>{% endif %}{% endmacro %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Fikir listesi</h1>
+    <div class="stamp">ABD'de SEC'e finansal raporlayan şirketler dört yayımlanmış kurala göre tarandı{% if run %} · {{ run.day|trdate }} · {{ tn(run.universe, 0) }} şirketin son çeyreği okundu{% endif %} · kaynak: SEC XBRL, Yahoo</div>
+  </div>
+  <form method="post" action="/fikirler/run">{% if running %}<button disabled>Taranıyor… (birkaç dakika)</button>{% else %}<button class="secondary">Yeniden tara</button>{% endif %}</form>
+</div>
+{% if running %}<meta http-equiv="refresh" content="15">{% endif %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+{% if not run %}
+<div class="panel empty-state"><h3>Henüz tarama yok</h3><p class="muted">"Yeniden tara" düğmesi ya da sunucuda <code>borsa-radar fikir run</code>. İlk tarama SEC verisini indirdiği için birkaç dakika sürer.</p></div>
+{% else %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Sonuç</h2>{% if bt %}<span class="stamp"><span class="src">geçmiş: {{ bt.from|trdate }} – {{ bt.to|trdate }}, yılda 4 kez yeniden kurulan liste, 6 aylık getiri</span></span>{% endif %}</div>
+  {% for code, (title, rule) in screens.items() %}{% set n = run.counts.get(code, 0) %}{% set b = bt.screens[code] if bt else none %}
+  {% set a6 = b.all['126'] if b else none %}{% set t6 = b.trend['126'] if b else none %}
+  {% set vd = verdicts.get(code, ('', 'neu')) %}
+  <div class="result {{ vd[1] }}" style="margin-bottom:6px"><span class="lbl">{{ title }}</span> <span class="band {{ vd[1] }}">{{ vd[0] }}</span>
+    Bugün <b>{{ n }}</b> şirket kuralı geçiyor.
+    {% if a6 and a6.n %}Geçmişte bu listeye giren hisseler 6 ayda ortalama <b class="{{ a6.avg|sgn }}">{{ tp(a6.avg, 1) }}</b> getirdi; aynı günlerde tüm hisselerin ortalamasına göre fark <b class="{{ a6.ex_uni|sgn }}">{{ tp(a6.ex_uni, 1) }}</b>, S&amp;P 500'ü yenme oranı %{{ tn(a6.beat_spy, 0) }} ({{ tn(a6.n, 0) }} seçim).
+      {% if t6 and t6.n %}Yalnız 200 günlük ortalamasının üstündekiler: fark <b class="{{ t6.ex_uni|sgn }}">{{ tp(t6.ex_uni, 1) }}</b>, S&amp;P'yi yenme %{{ tn(t6.beat_spy, 0) }} ({{ tn(t6.n, 0) }}).{% endif %}
+      {% set g6 = (b.range or {}).get('126') if b else none %}{% if g6 and g6.n and g6.gone is defined and g6.ex_spy_30 is defined %}<br><span class="small">Listeden çıkan şirketler hesaba katılınca: aynı dönemde <b>{{ tn(g6.gone, 0) }}</b> seçim 6 ay dolmadan borsadan çekildi (fiyatı yok).
+      S&amp;P 500'e göre fark ölçülen {{ tp(g6.ex_spy, 1) }} → her biri −%30 sayılırsa <b class="{{ g6.ex_spy_30|sgn }}">{{ tp(g6.ex_spy_30, 1) }}</b>, en kötü durumda (−%100) <b class="{{ g6.ex_spy_100|sgn }}">{{ tp(g6.ex_spy_100, 1) }}</b>.</span>{% endif %}
+    {% elif bt %}Geçmiş ölçüm için yeterli örnek yok.{% endif %}</div>
+  {% endfor %}
+  <div class="xs muted">Bu listeler alım önerisi değil, araştırılacak isimlerdir. Geçmiş ölçüm: 2019'dan beri her çeyrekte liste, o gün gerçekten açıklanmış bilançolarla yeniden kuruldu; getiriler bugünkü S&amp;P 500/400/600 üyeleri ve hâlâ işlem gören eski S&amp;P 500 üyeleriyle ölçüldü.
+    Borsadan çekilen şirketlerin ücretsiz fiyatı yok; bunlar artık sessizce atlanmıyor, sayılıyor ve sonuç bir aralık olarak veriliyor (ölçülen · her biri −%30 · en kötü −%100). S&amp;P 500'e göre fark bu yanlılıktan etkilenmez; "tüm hisselerin ortalaması" ise aynı yanlılığı taşır.
+    <b>Zarar eden şirketlerde bu yanlılık daha büyüktür</b>, bu yüzden "Kâra yaklaşan" ve "İlk kâr" için aralığın alt ucuna da bakın.
+    Ortalama ile medyan arasındaki fark, sonucun birkaç büyük kazanana dayandığını gösterir.</div>
+</section>
+
+{% for code, (title, rule) in screens.items() %}{% set rs = run.lists.get(code, []) %}
+<section class="panel hsec" id="{{ code }}">
+  <div class="sec-head"><h2>{{ title }} ({{ rs|length }})</h2>{% set lr = live.get(code) %}{% if lr and lr.n %}<span class="stamp">canlı sicil: {{ lr.n }} isim, ort. {{ tp(lr.avg, 1) }}, S&amp;P'yi yenen %{{ tn(lr.beat, 0) }}</span>{% endif %}</div>
+  <p class="small" style="margin-top:0">{{ rule }}</p>
+  {% set top = rs|selectattr('shown')|list %}
+  {% if top %}<div class="table-scroll"><table class="compact">
+    <tr><th>Hisse</th><th>Son çeyrek</th><th class="num">Gelir büyümesi</th>
+      {% if code in ('kara_yakin', 'ilk_kar') %}<th>Net kâr, son 5 çeyrek (eski → yeni)</th>{% elif code == 'hizlanan' %}<th class="num">Net kâr büyümesi</th><th class="num">Önceki çeyrek gelir büy.</th>{% else %}<th class="num">F-skor (7)</th><th class="num">Net kâr (12 ay)</th>{% endif %}
+      <th>Analistler</th><th>Haber akışı</th><th>Fiyat</th></tr>
+    {% for r in top %}{% set y = r.y or {} %}
+    <tr><td><a href="/h/{{ r.symbol }}"><b>{{ r.symbol }}</b></a> {{ size(r.mcap) }}<div class="xs muted">{{ r.name }}</div></td>
+      <td>{{ r.quarter_tr }}</td>
+      <td class="num {{ (r.rev_yoy or 0)|sgn }}">{{ tp((r.rev_yoy or 0) * 100, 0) }}{% if (r.rev_yoy or 0) > 1.5 %}<div class="xs warn">sıçrama: tek seferlik gelir (lisans, anlaşma ödemesi) olabilir</div>{% endif %}</td>
+      {% if code in ('kara_yakin', 'ilk_kar') %}
+      <td class="small">{% for v in r.ni_q|reverse %}<span class="{{ (v or 0)|sgn }}">{{ big(v) if v is not none else '—' }}</span>{% if not loop.last %} → {% endif %}{% endfor %}
+        {% if r.q_be %}<div class="xs muted">son 4 çeyreğin gidişiyle ~{{ tn(r.q_be, 0) }} çeyrekte başa baş</div>{% endif %}
+        {% if r.dil is not none and r.dil > 0.05 %}<div class="xs warn">hisse sayısı yılda %{{ tn(r.dil * 100, 0) }} arttı</div>{% endif %}</td>
+      {% elif code == 'hizlanan' %}
+      <td class="num pos">{{ tp((r.ni_yoy or 0) * 100, 0) }}</td><td class="num">{{ tp((r.rev_yoy_prev or 0) * 100, 0) }}</td>
+      {% else %}
+      <td class="num">{{ r.fscore }}/7</td><td class="num {{ (r.ni_ttm or 0)|sgn }}">{{ big(r.ni_ttm) }}</td>
+      {% endif %}
+      <td class="small">{% if y.eps_next_y is defined and y.eps_next_y is not none %}gelecek yıl HBK tahmini <b class="{{ y.eps_next_y|sgn }}">{{ tn(y.eps_next_y, 2) }}</b>{% if y.n_analysts %} ({{ y.n_analysts }} analist){% endif %}
+          {% if code == 'kara_yakin' %}<br><b class="{{ 'pos' if y.eps_next_y > 0 else 'neg' }}">{{ 'analistler gelecek yıl kâr bekliyor' if y.eps_next_y > 0 else 'analistler gelecek yıl da zarar bekliyor' }}</b>{% endif %}
+          {% if y.rev_90d is not none and y.rev_90d is defined %}<br>90 günde tahmin {{ tp(y.rev_90d, 0) }}{% endif %}
+          {% if y.rev_up30 is defined %}<br>30 günde ↑{{ y.rev_up30 }} ↓{{ y.rev_down30 }} revizyon{% endif %}
+        {% else %}<span class="muted">kapsam yok</span>{% endif %}</td>
+      <td class="small">{% if y.ratings_up90 is defined %}90 günde not/hedef ↑{{ y.ratings_up90 }} ↓{{ y.ratings_down90 }}{% endif %}
+        {% if y.insider_buys %}<br><span class="pos">içeriden alım: {{ y.insider_buys }} işlem{% if y.insider_buy_usd %} ({{ big(y.insider_buy_usd) }} $){% endif %}</span>{% endif %}
+        {% if y.news %}<details><summary class="xs">son haberler</summary>{% for n in y.news %}<div class="xs">{{ n.day }} {% if n.url %}<a href="{{ n.url }}" target="_blank" rel="noopener">{{ n.title }}</a>{% else %}{{ n.title }}{% endif %}</div>{% endfor %}</details>{% endif %}</td>
+      <td class="small">{{ tn(r.price) }} $ · {% if r.trend_up %}<span class="pos">200g üstü</span>{% else %}<span class="neg">200g altı</span>{% endif %}
+        {% if r.ret6 is not none and r.ret6_spy is not none %}<br>6 ay {{ tp(r.ret6 * 100, 0) }} (S&amp;P {{ tp(r.ret6_spy * 100, 0) }}){% endif %}
+        {% if r.off_hi is not none %}<br>zirveden {{ tp(r.off_hi, 0) }}{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>{% else %}<div class="muted small">Bugün bu kuralı geçen ve fiyat/likidite şartını (≥ 3 $, günlük ≥ 2 M$ işlem) sağlayan şirket yok.</div>{% endif %}
+  {% set rest = rs|rejectattr('shown')|list %}
+  {% if rest %}<details class="more"><summary>Kuralı geçen diğerleri ({{ rest|length }})</summary><div class="small">{% for r in rest %}<a href="/h/{{ r.symbol }}">{{ r.symbol }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</div></details>{% endif %}
+  {% set b = bt.screens[code] if bt else none %}
+  {% if b %}<details class="more"><summary>Geçmiş ölçüm ayrıntısı</summary><div class="table-scroll"><table class="compact">
+    <tr><th>Süre</th><th>Liste</th><th class="num">Seçim</th><th class="num">Ort. getiri</th><th class="num">Medyan</th><th class="num">Tüm hisselere göre fark</th><th class="num">Ortalamayı yenen</th><th class="num">S&amp;P'yi yenen</th><th class="num">En kötü %10</th></tr>
+    {% for h, lbl in [('63', '3 ay'), ('126', '6 ay'), ('252', '12 ay')] %}{% for v, vl in [('all', 'tümü'), ('trend', '200g üstü')] %}{% set s = b[v][h] %}{% if s.n %}
+    <tr><td>{{ lbl }}</td><td>{{ vl }}</td><td class="num">{{ tn(s.n, 0) }}</td><td class="num {{ s.avg|sgn }}">{{ tp(s.avg, 1) }}</td><td class="num {{ s.median|sgn }}">{{ tp(s.median, 1) }}</td>
+      <td class="num {{ s.ex_uni|sgn }}"><b>{{ tp(s.ex_uni, 1) }}</b></td><td class="num">%{{ tn(s.beat_uni, 0) }}</td><td class="num">%{{ tn(s.beat_spy, 0) }}</td><td class="num neg">{{ tp(s.p10, 0) }}</td></tr>{% endif %}{% endfor %}{% endfor %}
+  </table></div>
+  {% set yy = b.all['126'].years if b.all['126'].n else {} %}{% if yy %}<div class="xs muted">Yıl yıl (6 ay, tüm hisselere göre fark): {% for y, v in yy.items() %}{{ y }} <span class="{{ v.ex_uni|sgn }}">{{ tp(v.ex_uni, 1) }}</span> ({{ v.n }}){% if not loop.last %} · {% endif %}{% endfor %}</div>{% endif %}
+  </details>{% endif %}
+</section>
+{% endfor %}
+
+<details class="explain"><summary>Kurallar nereden geliyor, neye dikkat etmeli?</summary>
+  <p><b>Kâra yaklaşan / İlk kâr:</b> Zacks'in "First Profit" taraması ve "zararlar her çeyrek küçülüyorsa daha iyi" ilkesi; GeoInvesting'in "zarar + iyileşen marj" taramaları. Bu tip dönüş hikâyelerinde getiri dağılımı çarpıktır: birkaç büyük kazanan ortalamayı yukarı çeker, tipik hisse (medyan) daha zayıftır.</p>
+  <p><b>Hızlanan büyüme:</b> CANSLIM'in C (çeyreklik kâr ≥ %25) ve A (büyüme sürekliliği) harfleri; gelir büyümesinin hızlanması şartı eklendi.</p>
+  <p><b>Finansalı iyileşen:</b> Piotroski F-skor (2000). Nakit akışı testleri, çeyreklik nakit akışı SEC frames verisinde olmadığı için çıkarıldı (9 yerine 7 test).</p>
+  <p><b>Neden Google Trends yok:</b> Araştırmalar karışık; etkinin kısa sürüp tersine döndüğü ve işlem maliyetinden sonra kârlı olmadığı bulguları ağır basıyor. Google'ın resmi bir API'si de yok.</p>
+  <p><b>Veri notu:</b> SEC "frames" bir dönemin en son raporlanan değerini verir; sonradan düzeltilmiş bir rakam ilk açıklananın yerini alabilir. Mali yılın 4. çeyreği yıllık rakamdan diğer üç çeyrek çıkarılarak hesaplanır. Analist, not değişikliği, içeriden alım ve haber bilgisi Yahoo'dan gelir ve yalnız listenin üst kısmı için çekilir; kural sonucunu değiştirmez.</p>
+</details>
+{% endif %}
+<div class="xs muted" style="margin:10px 0">Bu sayfa kişisel araştırma içindir, yatırım tavsiyesi değildir. Ben lisanslı bir yatırım danışmanı değilim; liste, açıkça yazılmış kuralların mekanik çıktısıdır.</div>
+{% endblock %}

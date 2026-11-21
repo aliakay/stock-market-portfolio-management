@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Portföy riski · Borsa Radar{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Portföy riski</h1>
+    {% if r and not r.empty %}<p class="lede">{{ r.summary }}</p>{% endif %}
+  </div>
+  {% if r and not r.empty %}<div class="stamp">T = <b>{{ r.as_of }}</b> kapanışı · korelasyon/oynaklık {{ r.windows.corr_days }} gün, beta/VaR {{ r.windows.beta_days }} gün
+    {% for s in r.sources %}<span class="src">{{ s }}</span>{% endfor %}</div>{% endif %}
+</div>
+{% if not r or r.empty %}<div class="empty">Açık pozisyon yok.</div>{% else %}
+
+<div class="tiles risk-tiles">
+  <div class="tile"><div class="lbl">Portföy betası</div><div class="val {{ 'neg' if r.beta > 1.5 else '' }}">{{ tn(r.beta) }}</div>
+    <div class="sub muted">S&P %1 → portföy ≈ %{{ tn(r.beta, 1) }}</div></div>
+  <div class="tile"><div class="lbl">Yıllık oynaklık</div><div class="val">%{{ tn(r.vol_ex_ante, 0) }}</div>
+    <div class="sub muted">bugünkü ağırlıklarla · gerçekleşen %{{ tn(r.vol_realized, 0) }}</div></div>
+  <div class="tile"><div class="lbl">Günlük VaR (%95)</div><div class="val">{{ r.var95_usd|usd }}</div>
+    <div class="sub muted">%{{ tn(r.var95, 1) }} · kötü günlerin ort. %{{ tn(r.cvar95, 1) }}</div></div>
+  <div class="tile"><div class="lbl">Zirveden düşüş</div><div class="val neg">%{{ tn(r.cur_dd, 1) }}</div>
+    <div class="sub muted">zirve {{ r.peak_day }} · en kötü %{{ tn(r.max_dd, 1) }}</div></div>
+  <div class="tile"><div class="lbl">Etkin pozisyon sayısı</div><div class="val">{{ tn(r.effective_n, 1) }}</div>
+    <div class="sub muted">{{ r.n }} pozisyon · ilk 3 %{{ tn(r.top3, 0) }}</div></div>
+  <div class="tile"><div class="lbl">Hisse oranı / rejim tavanı</div><div class="val">%{{ tn(r.stock_pct, 0) }}{% if r.ceiling is not none %} <span class="small muted">/ %{{ r.ceiling }}</span>{% endif %}</div>
+    <div class="sub muted">{% if r.regime %}<a href="/piyasa">{{ r.regime.label }} {{ r.regime.score|round|int }}</a>{% endif %} · nakit {{ r.cash|usd }}</div></div>
+</div>
+{{ simple("Beta: piyasa (S&P 500) %1 oynadığında portföyün ortalama kaç % oynadığı; 1'in üstü piyasadan sert demek. Oynaklık: bir yılda tipik inip çıkma genişliği. VaR: 20 işlem gününden 1'inde bundan daha kötü bir gün beklenir (son 1 yıl bugünkü ağırlıklarla yeniden oynatıldı). Etkin pozisyon sayısı: ağırlıklar eşit olsaydı kaç hisseye denk gelirdi; düşükse portföy birkaç isme bağlıdır. Rejim tavanı: piyasa rejim puanına göre kuralın önerdiği en yüksek hisse oranı; yeni alım yaparken ölçü, satış önerisi değil.") }}
+
+{% if r.warnings %}<section class="panel hsec">
+  <div class="sec-head"><h2>Uyarılar</h2><span class="stamp">kural eşikleri: tek hisse %20 · küme %40 · sektör %40 · beta 1,5 · VaR %3</span></div>
+  {% for w in r.warnings %}<div class="result {{ 'neg' if w.level == 'warn' else 'neu' }}" style="margin-bottom:6px">{{ w.text|trnum }}{% if w.symbol %} <a class="small" href="/tez?symbol={{ w.symbol }}">Tez defteri →</a>{% endif %}</div>{% endfor %}
+</section>{% endif %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Stres testleri</h2><span class="stamp">bugünkü pozisyonlarla</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Senaryo</th><th class="num">S&P</th><th class="num">Tahmini etki</th><th class="num">%</th><th>En çok etkilenen</th></tr>
+    {% for s in r.stress %}<tr>
+      <td>{{ s.name }}{% if s.kind == 'geçmiş' and s.d0 %}<br><span class="xs muted">{{ s.d0 }} → {{ s.d1 }}{% if s.approx %} · ~ {{ s.approx|join(', ') }} o tarihte yoktu (beta × S&P){% endif %}</span>{% endif %}</td>
+      <td class="num">{% if s.spy_pct is defined and s.spy_pct is not none %}{{ s.spy_pct|pct }}{% else %}<span class="muted">—</span>{% endif %}</td>
+      <td class="num {{ s.pnl|sgn }}">{{ s.pnl|susd }}</td><td class="num {{ s.pct|sgn }}">{{ s.pct|pct }}</td>
+      <td class="small">{% for x in s.worst %}<a href="/h/{{ x.symbol }}">{{ x.symbol }}</a> {{ x.pnl|susd }}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+    </tr>{% endfor %}
+  </table></div>
+  {{ simple("Faktör senaryoları her hissenin son 1 yıldaki betasıyla hesaplanır (S&P, Nasdaq, yarı iletken fonu SMH, Bitcoin ayrı ayrı); tek faktörlü kaba bir tahmindir, gerçek düşüşte korelasyonlar artar ve kayıp daha büyük olabilir. Geçmiş senaryolar bugünkü pozisyonları o tarihlerdeki gerçek fiyat hareketleriyle yeniden oynatır; o tarihte işlem görmeyen hisse için beta × S&P kullanılır.") }}
+</section>
+
+<div class="grid" style="margin-top:14px">
+<section class="panel hsec">
+  <div class="sec-head"><h2>Pozisyon bazında risk</h2></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Sembol</th><th class="num">Ağırlık</th><th class="num">Riskin payı</th><th class="num">Beta</th><th class="num">SMH β</th><th class="num">BTC β</th><th class="num">Oynaklık</th><th>Sektör / sanayi</th></tr>
+    {% for h in r.holdings|sort(attribute='risk_share', reverse=true) %}<tr>
+      <td><a href="/h/{{ h.symbol }}"><b>{{ h.symbol }}</b></a>{% if h.short_history %} <span class="xs muted" title="1 yıldan kısa fiyat geçmişi">kısa geçmiş</span>{% endif %}</td>
+      <td class="num">%{{ tn(h.weight, 1) }}</td>
+      <td class="num"><b>{% if h.risk_share is not none %}%{{ tn(h.risk_share, 1) }}{% else %}—{% endif %}</b>
+        {% if h.risk_share is not none %}<div class="hbar"><span style="width:{{ [h.risk_share, 100]|min }}%"></span></div>{% endif %}</td>
+      <td class="num">{{ tn(h.beta) }}</td><td class="num">{{ tn(h.beta_smh) }}</td><td class="num">{{ tn(h.beta_btc) }}</td>
+      <td class="num">%{{ tn(h.vol, 0) }}</td><td class="small">{{ h.sector }}<br><span class="muted xs">{{ h.industry }}</span></td>
+    </tr>{% endfor %}
+  </table></div>
+  {{ simple("Riskin payı: portföyün toplam dalgalanmasının ne kadarının o hisseden geldiği. Ağırlığından çok daha büyük pay alan hisse (oynak ve diğerleriyle birlikte hareket eden) portföyü tek başına sallar.") }}
+</section>
+<aside>
+  <div class="panel"><h2 style="margin-top:0">Sektörler</h2>
+    {% for name, x in r.sectors %}<div class="evrow"><span class="small">{{ name }}</span><span class="num small" style="float:right">%{{ tn(x, 1) }}</span>
+      <div class="hbar {{ 'neg' if x > 40 }}"><span style="width:{{ [x, 100]|min }}%"></span></div></div>{% endfor %}
+    <h2>Sanayi</h2>
+    {% for name, x in r.industries[:8] %}<div class="evrow"><span class="small">{{ name }}</span><span class="num small" style="float:right">%{{ tn(x, 1) }}</span></div>{% endfor %}
+  </div>
+  {% if r.clusters %}<div class="panel" style="margin-top:12px"><h2 style="margin-top:0">Birlikte hareket edenler</h2>
+    {% for c in r.clusters %}<div class="evrow"><b>%{{ tn(c.weight, 1) }}</b> <span class="small">{{ c.symbols|join(', ') }}</span><br><span class="xs muted">ort. korelasyon {{ tn(c.avg_corr) }}</span></div>{% endfor %}
+    {{ simple("Son 6 ayda günlük getirileri arasında korelasyon 0,55'in üstünde olan hisseler aynı kümeye konur. Bu hisseler genellikle aynı gün birlikte yükselir ya da düşer; yani farklı isimler olsalar da tek bir büyük pozisyon gibi davranırlar.") }}
+  </div>{% endif %}
+</aside>
+</div>
+
+{% if r.corr %}<section class="panel hsec" style="margin-top:14px">
+  <div class="sec-head"><h2>Korelasyon matrisi</h2><span class="stamp">{{ r.corr.days }} ortak işlem günü · günlük getiriler</span></div>
+  <div class="table-scroll"><table class="compact corr">
+    <tr><th></th>{% for s in r.corr.symbols %}<th class="num">{{ s }}</th>{% endfor %}</tr>
+    {% for row in r.corr.matrix %}{% set i = loop.index0 %}<tr><th>{{ r.corr.symbols[i] }}</th>
+      {% for v in row %}<td class="num" style="background:{% if loop.index0 == i %}transparent{% elif v >= 0 %}rgba(248,81,73,{{ '%.2f'|format(v * 0.6) }}){% else %}rgba(63,185,80,{{ '%.2f'|format(-v * 0.6) }}){% endif %}">{{ '' if loop.index0 == i else tn(v) }}</td>{% endfor %}</tr>{% endfor %}
+  </table></div>
+  {{ simple("1'e yakın: iki hisse neredeyse hep aynı yöne gider (çeşitlendirme faydası az, kırmızı). 0 civarı: birbirinden bağımsız. Eksi: biri düşerken diğeri yükselme eğiliminde (yeşil, koruma sağlar).") }}
+</section>{% endif %}
+{% endif %}
+{% endblock %}

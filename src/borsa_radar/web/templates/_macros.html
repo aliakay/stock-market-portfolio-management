@@ -1,0 +1,85 @@
+{% macro event_card(e) %}
+<div class="card {{ e.direction|dir_cls }}">
+  <div class="meta">
+    <span class="badge type">{{ e.type|type_tr }}</span>
+    {% if e.importance %}<span class="badge imp{{ e.importance }}">önem {{ e.importance }}/5</span>{% endif %}
+    {% for s in (e.syms or e.symbol or '').split() %}<a class="badge sym" href="/h/{{ s }}">{{ s }}</a>{% endfor %}
+    {% for s, score in ((e.extra|loads({})).get('sentiment') or {}).items() if score is not none %}<span class="badge sentiment {{ 'pos' if score > 0 else 'neg' if score < 0 else 'neu' }}">{{ s }} {{ '%+.2f'|format(score) }}</span>{% endfor %}
+    <span title="{{ e.published_at|local('%d.%m.%Y %H:%M') }}">{{ e.published_at|local }} · {{ e.published_at|ago }}</span>
+    <span>{{ e.source }}</span>
+    {% if e.status == 'backfill' %}<span class="badge">analiz edilmedi</span>{% endif %}
+    {% if e.status == 'pending' %}<span class="badge">analiz ediliyor…</span>{% endif %}
+    {% if e.status == 'irrelevant' %}<span class="badge">ilgisiz</span>{% endif %}
+  </div>
+  <div class="title"><a href="/e/{{ e.id }}" style="color:inherit">{{ e.direction|dir_icon }} {{ e.title }}</a></div>
+  {% if e.summary_tr %}<div class="sum">{{ e.summary_tr }}</div>{% endif %}
+  {% if e.reasoning_tr %}<div class="why">{{ e.reasoning_tr }}</div>{% endif %}
+  {% set imp = e.portfolio_impact|loads({}) %}
+  {% if imp %}<div class="meta" style="margin-top:4px">Portföy:
+    {% for s, v in imp.items() %}<span>{{ s }} {{ v|int|dir_icon }}</span>{% endfor %}</div>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro quote_box(sym, q, label=None) %}
+<div class="quote">
+  <b>{% if label %}{{ label }}{% else %}<a href="/h/{{ sym }}">{{ sym }}</a>{% endif %}</b>
+  {% if q and q.price %}
+    <span class="px">{{ q.price|money }}</span>
+    {% if q.change_pct is not none %}<span class="{{ 'pos' if q.change_pct > 0 else 'neg' if q.change_pct < 0 else 'neu' }}"> {{ q.change_pct|pct }}</span>{% endif %}
+  {% else %}<span class="muted">—</span>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro cal_list(cal) %}
+{% for c in cal %}
+<div class="cal-item">
+  <span>{% if c.importance >= 5 %}🔥{% elif c.importance >= 4 %}⭐{% endif %} {{ c.name }}</span>
+  <span class="muted">{{ c.release_at|local('%a %d.%m %H:%M') }}</span>
+</div>
+{% else %}<div class="muted">Yakın tarihte önemli veri yok.</div>{% endfor %}
+{% endmacro %}
+
+{# Karar: small stance chip → the stock page's verdict card. #}
+{% macro karar_chip(c) %}{% if c %}<a class="kchip {{ c.tone or 'neu' }}" href="/h/{{ c.symbol }}#karar" title="{{ c.headline or '' }}">{{ c.stance_tr }}</a>{% endif %}{% endmacro %}
+
+{# Karar: one verdict card. compact=true drops the secondary blocks (used for dense lists). #}
+{% macro karar_card(c, compact=false, anchor='karar') %}{% if c %}
+<section class="panel kcard {{ c.tone or 'neu' }}{{ ' compact' if compact }}" id="{{ anchor }}">
+  <div class="kc-top">
+    <a class="kc-sym" href="/h/{{ c.symbol }}">{{ c.symbol }}</a>
+    <span class="kchip {{ c.tone or 'neu' }}">{{ c.stance_tr }}</span>
+    {% if c.pattern_tr %}<span class="kc-pattern">{{ c.pattern_tr }}</span>{% endif %}
+    {% if c.changed %}<span class="kc-changed" title="{{ c.changed.day or '' }}">önceki durum: {{ c.changed.from_tr }}{% if c.changed.day %} · {{ c.changed.day|trdate }}{% endif %}</span>{% endif %}
+  </div>
+  <div class="result {{ c.tone if c.tone in ('pos', 'neg') else '' }} kc-head">{{ c.headline or '—' }}</div>
+  {% if c.comment %}<p class="kc-comment">{{ c.comment }}</p>{% endif %}
+  {% set P = c.position %}
+  {% if P %}<div class="chips kc-pos">
+    {% if P.weight is not none %}<span class="chip">ağırlık %{{ tn(P.weight, 1) }}</span>{% endif %}
+    {% if P.unreal_pct is not none %}<span class="chip {{ P.unreal_pct|sgn }}">K/Z {{ tp(P.unreal_pct, 1) }}</span>{% endif %}
+    {% if P.risk_share is not none %}<span class="chip">risk payı %{{ tn(P.risk_share, 0) }}</span>{% endif %}
+    {% if P.beta is not none %}<span class="chip">beta {{ tn(P.beta, 2) }}</span>{% endif %}
+  </div>{% endif %}
+  {% set fo = (c['for'] or [])|sort(attribute='w', reverse=true) %}{% set ag = (c.against or [])|sort(attribute='w', reverse=true) %}
+  {% if fo or ag %}<div class="kc-cols">
+    <div class="kc-col pos"><div class="kc-lbl">Lehine</div>
+      {% for s in (fo[:3] if compact else fo) %}<div class="kc-sig" title="{{ s.src or '' }}"><span class="kc-w">{{ '●' * (s.w or 1) }}</span> {{ s.text }}</div>{% else %}<div class="muted small">—</div>{% endfor %}</div>
+    <div class="kc-col neg"><div class="kc-lbl">Aleyhine</div>
+      {% for s in (ag[:3] if compact else ag) %}<div class="kc-sig" title="{{ s.src or '' }}"><span class="kc-w">{{ '●' * (s.w or 1) }}</span> {{ s.text }}</div>{% else %}<div class="muted small">—</div>{% endfor %}</div>
+  </div>{% endif %}
+  {% if not compact %}
+  {% set ch = c.changers or {} %}
+  {% if ch.up or ch.down %}<div class="kc-block"><div class="kc-lbl">Ne değiştirir?</div>
+    {% for x in ch.up or [] %}<div class="small"><span class="pos">▲</span> {{ x.text }}</div>{% endfor %}
+    {% for x in ch.down or [] %}<div class="small"><span class="neg">▼</span> {{ x.text }}</div>{% endfor %}</div>{% endif %}
+  {% if c.next %}<div class="kc-block"><div class="kc-lbl">Sıradaki tarihler</div>
+    {% for x in c.next %}<div class="small"><b>{{ x.day|trdate }}</b> · {{ x.text }}</div>{% endfor %}</div>{% endif %}
+  {% if c.todo %}<div class="kc-block"><div class="kc-lbl">Yapılacak</div>
+    {% for x in c.todo %}<div class="small">{% if x.href %}<a href="{{ x.href }}">{{ x.text }} →</a>{% else %}{{ x.text }}{% endif %}</div>{% endfor %}</div>{% endif %}
+  {% if c.notes %}<div class="kc-block"><div class="kc-lbl">Notlar</div>
+    {% for s in c.notes %}<div class="small muted" title="{{ s.src or '' }}">· {{ s.text }}</div>{% endfor %}</div>{% endif %}
+  {% endif %}
+  <div class="stamp kc-stamp">T = <b>{{ c.as_of or '—' }}</b> · kurallar {{ c.rules_ver or '—' }}{% if c.comment_model %} · yorum: {{ c.comment_model }}{% endif %}
+    · <a href="/h/{{ c.symbol }}#karar">{{ c.symbol }}</a></div>
+</section>
+{% endif %}{% endmacro %}

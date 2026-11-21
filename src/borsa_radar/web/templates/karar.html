@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% from "_macros.html" import karar_card, karar_chip %}
+{% block title %}Karar · Borsa Radar{% endblock %}
+{% block content %}
+{% if running %}<meta http-equiv="refresh" content="8">{% endif %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Karar</h1>
+    <div class="stamp">{% if board %}Baz gün (T): <b>{{ board.as_of or '—' }}</b> · hesaplandı {% if board.run and board.run.created_at %}{{ board.run.created_at|local('%d.%m %H:%M') }}{% else %}—{% endif %}{% else %}Henüz hesaplanmadı{% endif %}</div>
+  </div>
+  <form method="post" action="/karar/run">{% if running %}<button disabled>Hesaplanıyor…</button>{% else %}<button class="secondary">Yeniden hesapla</button>{% endif %}</form>
+</div>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+{% if not board %}
+<div class="panel empty-state"><h3>Henüz karar yok</h3><p class="muted">“Yeniden hesapla” ile ilk kararı oluştur: her pozisyon için kurallar durumu belirler, model yalnızca kısa bir yorum yazar. Her gece 01:25'te otomatik hesaplanır.</p></div>
+{% else %}
+<section class="panel hsec">
+  <div class="sec-head"><h2>Sonuç</h2></div>
+  <div class="result {{ board.market.tone if board.market and board.market.tone in ('pos', 'neg') else '' }}"><span class="lbl">Portföy</span> {{ board.headline or '—' }}</div>
+  {% if board.comment %}<p class="lede" style="margin:8px 0 0">{{ board.comment }}</p>
+    <div class="xs muted">Yorum: {{ board.comment_model or 'model' }}. Sayıları sunucu doğrular.</div>{% endif %}
+</section>
+
+<div class="grid2">
+  {% set m = board.market %}
+  <section class="panel hsec">
+    <div class="sec-head"><h2>Piyasa</h2><span class="stamp"><a href="/piyasa">Rejim & Nabız →</a></span></div>
+    {% if m %}<div class="chips"><span class="chip {{ m.tone or '' }}">{{ m.label or '—' }}{% if m.score is not none %} · {{ tn(m.score, 0) }}/100{% endif %}</span></div>
+      {% if m.text %}<p class="small" style="margin:8px 0 0">{{ m.text }}</p>{% endif %}{% else %}<div class="muted small">Piyasa bilgisi yok.</div>{% endif %}
+  </section>
+  <section class="panel hsec">
+    <div class="sec-head"><h2>Durumlar (ağırlığa göre)</h2></div>
+    {% for s in board.stance_counts or [] %}{% if s.n %}<div class="evrow small"><span class="kchip {{ s.tone or 'neu' }}">{{ s.stance_tr }}</span>
+      <b>{{ s.n }}</b> hisse{% if s.weight_pct is not none %} · portföyün %{{ tn(s.weight_pct, 0) }}'i{% endif %}
+      <span class="muted">{% for sym in s.symbols or [] %}<a href="#k-{{ sym }}">{{ sym }}</a>{% if not loop.last %}, {% endif %}{% endfor %}</span></div>{% endif %}
+    {% else %}<div class="muted small">Pozisyon yok.</div>{% endfor %}
+  </section>
+</div>
+
+{% if board.agenda %}<section class="panel hsec">
+  <div class="sec-head"><h2>Gündem</h2><span class="stamp">en çok dikkat isteyenler</span></div>
+  {% for a in board.agenda %}<div class="evrow small">{{ loop.index }}.
+    {% if a.symbol %}<a href="#k-{{ a.symbol }}">{{ a.text }}</a>{% elif a.href and a.href != '/karar' %}<a href="{{ a.href }}">{{ a.text }}</a>{% else %}{{ a.text }}{% endif %}</div>{% endfor %}
+</section>{% endif %}
+
+{% if board.changes %}<section class="panel hsec">
+  <div class="sec-head"><h2>Son değişiklikler</h2></div>
+  {% for c in board.changes %}<div class="evrow small"><a href="/h/{{ c.symbol }}#karar"><b>{{ c.symbol }}</b></a> {{ c.from_tr }} → <b>{{ c.to_tr }}</b>
+    {% if c.day %}<span class="muted xs">{{ c.day|trdate }}</span>{% endif %}</div>{% endfor %}
+</section>{% endif %}
+
+{% for c in board.cards or [] %}{{ karar_card(c, anchor='k-' ~ c.symbol) }}{% else %}<div class="empty">Kart yok.</div>{% endfor %}
+{% endif %}
+
+<section class="panel hsec" id="sicil">
+  <div class="sec-head"><h2>Sicil</h2><span class="stamp">durumlara göre sonraki {{ tr.horizon if tr else 20 }} işlem günü (S&P 500'e göre fark)</span></div>
+  {% if tr and tr.rows %}<div class="table-scroll"><table class="compact"><tr><th>Durum</th><th class="num">n</th><th class="num">Ort. fark</th><th class="num">İsabet</th></tr>
+    {% for r in tr.rows %}<tr><td><span class="kchip {{ r.tone or 'neu' }}">{{ r.label }}</span></td><td class="num">{{ r.n }}</td><td class="num {{ r.avg|sgn }}">{{ tp(r.avg) }}</td><td class="num">{{ '—' if r.hit is none else '%' ~ tn(r.hit, 0) }}</td></tr>{% endfor %}</table></div>{% endif %}
+  {% if not tr or (tr.n or 0) < 20 %}<div class="flash err small" style="margin-top:8px">Örnek küçük (n = {{ tr.n if tr else 0 }} &lt; 20): bu oranlar henüz güvenilir değil. Kararlar her gece otomatik kaydediliyor; sicil kendiliğinden birikecek.</div>{% endif %}
+  <div class="xs muted" style="margin-top:6px">İsabet: sağlam durumda S&P'yi geçmesi, tezi sorgulatan ya da kural ihlali durumlarında geride kalması.{% if tr %} Tüm sembollerin kararları dahil ({{ tr.cards }} kayıt).{% endif %}</div>
+</section>
+
+<details class="explain"><summary>Bu sonuç nasıl hesaplanıyor?</summary>
+  <p>Durumu kurallar belirler: her pozisyon için tez kuralları, karne, trend, değerleme, risk payı ve piyasa rejimi sunucuda sabit kurallarla tartılır; aynı veri her zaman aynı sonucu verir.</p>
+  <p>Model durumu değiştiremez; yalnızca kısa bir yorum yazar. Yorumdaki her sayı girdideki verilerle karşılaştırılır, girdide olmayan bir sayı varsa yorum reddedilir ve yalnızca sunucunun yazdığı cümle gösterilir.</p>
+  <p>Etiketler bir durum tarifidir, al-sat emri ya da yatırım tavsiyesi değildir: “Sağlam” bugünkü verilerin tezi desteklediği, “İzle” karışık sinyal olduğu, “Tezi sorgula” ve “Kural ihlali” ise tezini yeniden düşünmen gerektiği anlamına gelir. Karar sana aittir.</p>
+</details>
+{% endblock %}

@@ -1,0 +1,191 @@
+{% extends "base.html" %}
+{% block title %}Strateji laboratuvarı · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Strateji laboratuvarı</h1>
+    <div class="stamp">Kural tabanlı kısa vadeli stratejiler 20 yıllık veride sınandı; geçenler her gece gerçek fiyatlarla kağıt üzerinde işleniyor.
+      {% if res %}· test verisi {{ res.data_through|trdate }}'e kadar · {{ res.universe }} hisse{% endif %}</div>
+  </div>
+  <form method="post" action="/setups/strateji/run">{% if running %}<button disabled>Taranıyor…</button>{% else %}<button class="secondary">Sinyalleri şimdi tara</button>{% endif %}</form>
+</div>
+{% if running %}<meta http-equiv="refresh" content="8">{% endif %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+{% if not res or not strategies %}
+<div class="panel empty-state"><h3>Henüz geriye dönük test sonucu yok</h3>
+  <p class="muted">Sunucuda <code>borsa-radar lab download</code> ve ardından <code>borsa-radar lab run</code> çalıştırılınca sonuçlar burada görünür.</p></div>
+{% else %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Sonuç</h2><span class="stamp"><span class="src">Yahoo düzeltilmiş günlük mumlar · {% if res.universe_mode == 'pit' %}{{ res.universe }} hisse: her gün o günkü S&amp;P 500 üyeleri (endeksten çıkanlar dahil){% else %}{{ res.universe }} hisse (bugünkü S&amp;P 500 + 400 + kendi listen){% endif %} · 2006 → {{ res.data_through[:4] }}</span></span></div>
+  {% for s in res.strategies %}{% set te = s.test %}{% set tb = s.test_book %}
+  <div class="result {{ 'pos' if te.avg > 0 and te.win >= 80 else ('warn' if te.avg > 0 else 'neg') }}" style="margin-bottom:6px"><span class="lbl">{{ s.name }}</span>
+    Hiç görmediği 2017 → bugün döneminde {{ tn(te.n, 0) }} işlemin <b>%{{ tn(te.win, 1) }}</b>'i kârla kapandı; işlem başına ortalama <b class="{{ te.avg|sgn }}">{{ tp(te.avg, 2) }}</b> (maliyet sonrası).
+    10 pozisyonluk kağıt portföy yılda {{ tp(tb.cagr, 1) }} getirdi, en derin düşüş %{{ tn(tb.max_dd, 0) }} (aynı dönemde S&amp;P 500: yılda {{ tp(s.test_spy.cagr, 1) }}, en derin düşüş %{{ tn(s.test_spy.max_dd, 0) }}).</div>
+  {% endfor %}
+  <div class="xs muted">Başarı oranı = net getirisi sıfırın üstünde kapanan işlemlerin payı. Yüksek başarı oranı tek başına yetmez: bu stratejilerde kazançlar küçük, kayıplar seyrek ama büyüktür; bu yüzden ortalama kayıp, en kötü işlem ve en derin düşüş de yazılıdır.</div>
+</section>
+
+{% if stress %}{% set R = stress.rules %}
+<section class="panel hsec" id="stres">
+  <div class="sec-head"><h2>Stres testleri</h2><span class="stamp"><span class="src">{{ stress.created_at[:10]|trdate }} · veri {{ stress.data_through|trdate }}'e kadar · eşikler {{ R.fixed_on|trdate }}'de sabitlendi · her ayın ilk pazarı yenilenir</span></span></div>
+  <p class="small" style="margin-top:0">Tek bir geriye dönük test sonucu çok şeyi gizler. Her strateji dört ayrı testten geçirilir; her test, bir sonucun yanıltabileceği bir yolu kapatır. <b>Dördünü birden geçemeyen strateji reddedilir.</b> Eşikler sonuçlara bakılmadan önce yazıldı.</p>
+  {% if journal and (journal[0].rules_changed or journal[0].code_changed) %}<div class="result warn" style="margin-bottom:6px"><span class="lbl">Dikkat</span>Bu çalıştırmadan önce {{ 'geçme eşikleri' if journal[0].rules_changed else 'test ya da geriye dönük test kodu' }} değişti. Sonuçlar önceki çalıştırmalarla birebir karşılaştırılamaz.</div>{% endif %}
+  {% for s in stress.strategies %}{% set t = s.tests %}{% set f = t.fee %}{% set st = t.starts %}{% set rk = t.rank %}{% set rn = t.random %}
+  <div class="result {{ 'pos' if s.passed else 'neg' }}" style="margin-bottom:6px"><span class="lbl">{{ s.name }}</span>
+    {% if s.passed %}Dört testi de geçti.{% else %}<b>Reddedildi</b>: {% for c in s.failed %}{{ test_names[c] }}{% if not loop.last %}, {% endif %}{% endfor %} testinden geçemedi. Sinyalleri sayfada kayıt için izlenmeye devam eder ama sabah özetine girmez.{% endif %}</div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Test</th><th>Ölçülen</th><th>Geçme şartı</th><th></th></tr>
+    <tr><td><b>Maliyet taraması</b></td>
+      <td class="small">Başa baş maliyet <b>{% if f.break_even is not none %}%{{ tn(f.break_even, 2) }}{% else %}%{{ tn(R.fee.costs_rt_pct[-1], 1) }}'den yüksek{% endif %}</b> (alış + satış toplamı). %{{ tn(f.need_cost, 2) }} maliyette işlem başına ort. <span class="{{ f.at_need.avg|sgn }}">{{ tp(f.at_need.avg, 2) }}</span>, 10 pozisyonluk defter yılda <span class="{{ f.at_need.cagr|sgn }}">{{ tp(f.at_need.cagr, 1) }}</span>.</td>
+      <td class="small">Gerçekçi maliyetin {{ R.fee.survive_x }} katında (%{{ tn(f.need_cost, 2) }}) ortalama işlem kârda ve defter büyüyor</td>
+      <td>{% if f.pass %}<span class="badge pos">geçti</span>{% else %}<span class="badge neg">kaldı</span>{% endif %}</td></tr>
+    <tr><td><b>Her başlangıç günü</b></td>
+      <td class="small">{% if st.n %}Defter {{ tn(st.n, 0) }} farklı günde başlatıldı, her biri 12 ay sürdü. 12 ay sonra medyan <b class="{{ st.median|sgn }}">{{ tp(st.median, 1) }}</b>, en kötü <b class="{{ st.worst|sgn }}">{{ tp(st.worst, 1) }}</b> ({{ (st.worst_day|string)[:4] }}-{{ (st.worst_day|string)[4:6] }} başlangıcı), en iyi {{ tp(st.best, 1) }}. Başlangıçların %{{ tn(st.share_pos, 0) }}'ında kârda, %{{ tn(st.share_beat_spy, 0) }}'ında S&amp;P 500'ü geçti (S&amp;P medyanı {{ tp(st.spy_median, 1) }}).{% else %}veri yok{% endif %}</td>
+      <td class="small">Medyan &gt; %{{ tn(R.starts.median_min, 0) }} ve en kötü ≥ %{{ tn(R.starts.worst_min, 0) }}</td>
+      <td>{% if st.pass %}<span class="badge pos">geçti</span>{% else %}<span class="badge neg">kaldı</span>{% endif %}</td></tr>
+    <tr><td><b>Seçim / sınav sırası</b></td>
+      <td class="small">Aynı kuralın {{ rk.grid }} farklı ayarı başarı oranına göre sıralandı. Bu ayar seçim döneminde (2006–2016) <b>{{ rk.train_rank or '—' }}. / {{ rk.train_of }}</b>, hiç görmediği 2017 → dönemde <b>{{ rk.test_rank or '—' }}. / {{ rk.test_of }}</b>.
+        {% if rk.winner %}Seçim döneminin birincisi sınavda {{ rk.winner_test_rank or '—' }}. oldu.{% endif %}</td>
+      <td class="small">İki dönemde de ilk çeyrekte (seçimde ≤ {{ rk.top_train }}, sınavda ≤ {{ rk.top_test }}); en az {{ R.rank.min_trades }} işlem</td>
+      <td>{% if rk.pass %}<span class="badge pos">geçti</span>{% else %}<span class="badge neg">kaldı</span>{% endif %}</td></tr>
+    <tr><td><b>Rastgele girişe karşı</b></td>
+      <td class="small">{% if rn.same_exit %}Kural: {{ tn(rn.n, 0) }} işlem, ort. <b>{{ tp(rn.real_avg, 2) }}</b>, başarı %{{ tn(rn.real_win, 1) }}.<br>
+        Aynı emir ve çıkış, rastgele gün: ort. {{ tp(rn.same_exit.median, 2) }}, başarı %{{ tn(rn.same_exit.win_median, 0) }} → kural rastgelelerin <b>%{{ tn(rn.same_exit.pct, 1) }}</b>'ini geçti, z = <b>{{ tn(rn.same_exit.z, 1) }}</b>.<br>
+        Rastgele giriş, aynı tutma süresi: ort. {{ tp(rn.random_hold.median, 2) }}, başarı %{{ tn(rn.random_hold.win_median, 0) }} → <b>%{{ tn(rn.random_hold.pct, 1) }}</b>, z = <b>{{ tn(rn.random_hold.z, 1) }}</b>.{% else %}{{ rn.note or 'veri yok' }}{% endif %}</td>
+      <td class="small">İkisinde de ≥ %{{ tn(R.random.pct_min, 0) }} ve z ≥ {{ tn(rn.bar, 2) }} (laboratuvarda denenen {{ rn.attempts }} ayar için şans çıtası)</td>
+      <td>{% if rn.pass %}<span class="badge pos">geçti</span>{% else %}<span class="badge neg">kaldı</span>{% endif %}</td></tr>
+  </table></div>
+  <details class="more"><summary>Ayrıntılar: maliyet tablosu, başlangıç günü grafiği, ayar sıralaması</summary>
+    <div class="ph" style="margin-top:8px">Maliyet taraması (2017 → bugün)</div>
+    <div class="table-scroll"><table class="compact">
+      <tr><th class="num">Gidiş-dönüş maliyet</th><th class="num">İşlem</th><th class="num">Başarı</th><th class="num">Ort. işlem</th><th class="num">Kâr faktörü</th><th class="num">Defter yıllık</th></tr>
+      {% for r in f.rows %}<tr{% if (r.cost - f.need_cost)|abs < 0.000001 %} style="font-weight:600"{% endif %}><td class="num">%{{ tn(r.cost, 2) }}</td><td class="num">{{ tn(r.n, 0) }}</td><td class="num">%{{ tn(r.win, 1) }}</td>
+        <td class="num {{ r.avg|sgn }}">{{ tp(r.avg, 2) }}</td><td class="num">{{ tn(r.pf, 2) if r.pf is not none else '—' }}</td><td class="num {{ r.cagr|sgn }}">{{ tp(r.cagr, 1) }}</td></tr>{% endfor %}
+    </table></div>
+    <div class="xs muted">Revolut gibi aracı kurumlarda komisyon ve döviz çevirme ücreti bu maliyete eklenir. Kendi toplam maliyetin başa baş maliyetin altında kalmalı.</div>
+    {% if st.series and st.series|length > 2 %}{% set bk = st.series|map(attribute=1)|list %}{% set sp = st.series|map(attribute=2)|list %}{% set lo = [bk|min, sp|min, 0]|min %}{% set hi = [bk|max, sp|max, 0]|max %}
+    <div class="ph" style="margin-top:10px">Başlangıç gününe göre 12 ay sonraki sonuç</div>
+    <div class="xs muted"><b style="color:#58a6ff">defter</b> · <b style="color:#8b949e">S&amp;P 500</b> · yatay çizgi = %0 · soldan sağa başlangıç günü {{ (st.series[0][0]|string)[:4] }} → {{ (st.series[-1][0]|string)[:4] }} · aralık {{ tp(lo, 0) }} … {{ tp(hi, 0) }}</div>
+    <svg viewBox="0 0 600 140" preserveAspectRatio="none" style="width:100%;height:110px">
+      {% set zy = 140 - (0 - lo) / ((hi - lo) or 1) * 132 - 4 %}<line x1="0" x2="600" y1="{{ zy }}" y2="{{ zy }}" stroke="#30363d" stroke-width="1"/>
+      <polyline fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="3 2" points="{{ line_path(sp, lo=lo, hi=hi) }}"/>
+      <polyline fill="none" stroke="#58a6ff" stroke-width="1.4" points="{{ line_path(bk, lo=lo, hi=hi) }}"/></svg>
+    <div class="xs muted">En derin ara düşüş (herhangi bir 12 aylık pencerede): %{{ tn(st.worst_dd, 1) }}.</div>
+    {% endif %}
+    <div class="ph" style="margin-top:10px">Ayar sıralaması (başarı oranına göre; sınavda ilk 8 + bu ayar + seçim birincisi)</div>
+    <div class="table-scroll"><table class="compact">
+      <tr><th>Ayar</th><th class="num">Seçim sırası</th><th class="num">Seçim başarı / işlem</th><th class="num">Sınav sırası</th><th class="num">Sınav başarı / işlem</th><th class="num">Sınav ort.</th></tr>
+      {% for r in rk.rows %}<tr{% if r.key == s.key %} style="font-weight:600"{% endif %}><td class="small"><code>{{ r.key }}</code>{% if r.key == s.key %} ← bu strateji{% elif r.key == rk.winner %} ← seçim birincisi{% endif %}</td>
+        <td class="num">{{ r.rt or '—' }}</td><td class="num">%{{ tn(r.train.win, 1) }} / {{ tn(r.train.n, 0) }}</td><td class="num">{{ r.re or '—' }}</td><td class="num">%{{ tn(r.test.win, 1) }} / {{ tn(r.test.n, 0) }}</td><td class="num {{ r.test.avg|sgn }}">{{ tp(r.test.avg, 2) }}</td></tr>{% endfor %}
+    </table></div>
+    {% if rn.same_exit %}<div class="xs muted" style="margin-top:6px">Rastgele stratejiler: {{ tn(R.random.draws, 0) }} tane, her biri kuralla aynı sayıda ({{ tn(rn.n, 0) }}) işlem. "Aynı emir ve çıkış": emrin dolacağı {{ tn(rn.same_exit.pool, 0) }} uygun günden rastgele seçim (sinyal şartı hariç her şey aynı). "Rastgele giriş": trendde, likit ve piyasa filtresinin açık olduğu {{ tn(rn.random_hold.pool, 0) }} günden rastgele seçim, ertesi açılışta alış, gerçek işlemlerle aynı sürede satış. Rastgelelerin en iyi %5'i: {{ tp(rn.same_exit.p95, 2) }} / {{ tp(rn.random_hold.p95, 2) }}.</div>{% endif %}
+  </details>
+  {% endfor %}
+  <details class="more"><summary>Laboratuvar günlüğü ve kurallar</summary>
+    <div class="small" style="margin-top:6px">Laboratuvarda bugüne kadar <b>{{ stress.attempts }}</b> farklı ayar denendi. N ayar denenince, hiçbir gerçek üstünlüğü olmayan ayarların en iyisi bile şans eseri z ≈ √(2·ln N) = <b>{{ tn(stress.bar, 2) }}</b> görünür. Bu yüzden rastgele testte çıta deneme sayısıyla yükselir. Ayarlar birbirine benzediği için bu çıta temkinli (sıkı) tarafta kalır.</div>
+    <div class="table-scroll"><table class="compact" style="margin-top:6px">
+      <tr><th>Tarih</th><th>Veri</th><th>Sonuç</th><th class="num">Denenen</th><th>Kural / kod özeti</th></tr>
+      {% for j in journal %}<tr><td>{{ j.created_at[:10]|trdate }}</td><td>{{ (j.body.data_through or '')|trdate }}</td>
+        <td class="small">{% for code, v in (j.body.verdicts or {}).items() %}{{ v.name }}: {% if v.passed %}<span class="pos">geçti</span>{% else %}<span class="neg">reddedildi</span> ({% for c in v.failed %}{{ test_names[c] }}{% if not loop.last %}, {% endif %}{% endfor %}){% endif %}{% if not loop.last %} · {% endif %}{% endfor %}</td>
+        <td class="num">{{ j.attempts }}</td><td class="xs"><code>{{ j.rules_hash }}</code> / <code>{{ j.code_hash }}</code>{% if j.rules_changed %} <span class="badge warn">eşik değişti</span>{% elif j.code_changed %} <span class="badge warn">kod değişti</span>{% endif %}</td></tr>{% endfor %}
+    </table></div>
+    <div class="xs muted" style="margin-top:6px">Sabit eşikler (sürüm {{ R.version }}): maliyet {{ R.fee.survive_x }}× · başlangıç: {{ R.starts.horizon }} seans, medyan &gt; %{{ tn(R.starts.median_min, 0) }}, en kötü ≥ %{{ tn(R.starts.worst_min, 0) }} · sıra: ilk %{{ tn(R.rank.top_share * 100, 0) }}, en az {{ R.rank.min_trades }} işlem · rastgele: {{ tn(R.random.draws, 0) }} strateji, ≥ %{{ tn(R.random.pct_min, 0) }} ve z ≥ max({{ tn(R.random.z_floor, 3) }}, √(2·ln N)).</div>
+  </details>
+</section>
+{% endif %}
+
+{% for s in res.strategies %}
+<section class="panel hsec" id="{{ s.code }}">
+  <div class="sec-head"><h2>{{ s.name }}</h2><span class="stamp"><span class="src">kural kodu {{ s.key }}</span></span></div>
+  <p class="small" style="margin-top:0">{{ s.what }}</p>
+  <div class="kv small"><b>Giriş:</b> {{ s.entry_tr }}<br><b>Çıkış:</b> {{ s.exit_tr }}</div>
+  <div class="table-scroll"><table class="compact" style="margin-top:8px">
+    <tr><th>Dönem</th><th class="num">İşlem</th><th class="num">Başarı</th><th class="num">Ort. işlem</th><th class="num">Ort. kazanç</th><th class="num">Ort. kayıp</th><th class="num">Kâr faktörü</th><th class="num">En kötü %5</th><th class="num">En kötü işlem</th><th class="num">Ort. süre</th><th class="num">Maliyet ×2 ile başarı / ort.</th></tr>
+    {% for w, lbl in [('train', 'Seçim dönemi 2006–2016'), ('test', 'Sınav dönemi 2017 → bugün')] %}{% set a = s[w] %}{% set b = s[w ~ '_stress'] %}
+    <tr><td>{{ lbl }}</td><td class="num">{{ tn(a.n, 0) }}</td><td class="num"><b>%{{ tn(a.win, 1) }}</b></td><td class="num {{ a.avg|sgn }}">{{ tp(a.avg, 2) }}</td>
+      <td class="num pos">{{ tp(a.avg_win, 2) }}</td><td class="num neg">{{ tp(a.avg_loss, 2) }}</td><td class="num">{{ tn(a.pf, 2) if a.pf is not none else '∞' }}</td>
+      <td class="num neg">{{ tp(a.p5, 1) }}</td><td class="num neg">{{ tp(a.worst, 1) }}</td><td class="num">{{ tn(a.hold, 1) }} gün</td>
+      <td class="num">%{{ tn(b.win, 1) }} / <span class="{{ b.avg|sgn }}">{{ tp(b.avg, 2) }}</span></td></tr>{% endfor %}
+  </table></div>
+  <div class="ph" style="margin-top:10px">10 pozisyonluk kağıt portföy <span class="xs muted" style="text-transform:none;letter-spacing:0">— her sinyale sermayenin %10'u, boş yer yoksa sinyal atlanır, en aşırı satılmış olan önce alınır</span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Dönem</th><th class="num">Yıllık getiri</th><th class="num">En derin düşüş</th><th class="num">Piyasada kalma</th><th class="num">Alınan işlem</th><th class="num">Başarı</th><th class="num">S&amp;P 500 yıllık</th><th class="num">S&amp;P 500 en derin düşüş</th></tr>
+    {% for w, lbl in [('train', '2006–2016'), ('test', '2017 → bugün')] %}{% set p = s[w ~ '_book'] %}{% set sp = s[w ~ '_spy'] %}
+    <tr><td>{{ lbl }}</td><td class="num {{ p.cagr|sgn }}"><b>{{ tp(p.cagr, 1) }}</b></td><td class="num neg">%{{ tn(p.max_dd, 1) }}</td><td class="num">%{{ tn(p.exposure, 0) }}</td>
+      <td class="num">{{ tn(p.taken.n, 0) }}</td><td class="num">%{{ tn(p.taken.win, 1) }}</td><td class="num">{{ tp(sp.cagr, 1) }}</td><td class="num">%{{ tn(sp.max_dd, 1) }}</td></tr>{% endfor %}
+  </table></div>
+  {% for w in ['train', 'test'] %}{% set cv = s[w ~ '_book'].curve %}{% set sc = s[w ~ '_spy'].curve or [] %}{% if cv|length > 2 %}
+  {% set vals = cv|map(attribute=1)|list + sc|map(attribute=1)|list %}
+  <div class="xs muted" style="margin-top:6px">{{ 'Seçim dönemi 2006–2016' if w == 'train' else 'Sınav dönemi 2017 → bugün' }}: 1 $ →
+    <b style="color:#58a6ff">kağıt portföy {{ tn(cv[-1][1], 2) }} $</b>{% if sc %} · <b style="color:#8b949e">S&amp;P 500 {{ tn(sc[-1][1], 2) }} $</b>{% endif %} (log ölçek)</div>
+  <svg viewBox="0 0 600 140" preserveAspectRatio="none" style="width:100%;height:110px">
+    {% if sc %}<polyline fill="none" stroke="#8b949e" stroke-width="1" stroke-dasharray="3 2" points="{{ curve_path(sc, lo=vals|min, hi=vals|max) }}"/>{% endif %}
+    <polyline fill="none" stroke="#58a6ff" stroke-width="1.6" points="{{ curve_path(cv, lo=vals|min, hi=vals|max) }}"/></svg>
+  {% endif %}{% endfor %}
+  {% set ys = s.all.years %}
+  {% if ys %}<details class="more"><summary>Yıl yıl başarı oranı ve ortalama işlem</summary><div class="table-scroll"><table class="compact">
+    <tr><th>Yıl</th>{% for y in ys %}<th class="num">{{ y }}</th>{% endfor %}</tr>
+    <tr><td>İşlem</td>{% for y, v in ys.items() %}<td class="num">{{ v.n }}</td>{% endfor %}</tr>
+    <tr><td>Başarı</td>{% for y, v in ys.items() %}<td class="num {{ 'pos' if v.win >= 80 else ('neg' if v.win < 65 else '') }}">%{{ tn(v.win, 0) }}</td>{% endfor %}</tr>
+    <tr><td>Ort.</td>{% for y, v in ys.items() %}<td class="num {{ v.avg|sgn }}">{{ tp(v.avg, 2) }}</td>{% endfor %}</tr>
+  </table></div></details>{% endif %}
+  {% set pr = rec.get(s.code) %}
+  {% if pr %}<div class="ph" style="margin-top:10px">Canlı kağıt sicil</div>
+  <div class="small">{% if pr.all.n %}{{ pr.all.n }} kapanan işlemde başarı <b>%{{ tn(pr.all.win, 1) }}</b>, ort. <span class="{{ pr.all.avg|sgn }}">{{ tp(pr.all.avg, 2) }}</span>
+    {% if pr.book.n %}· defter (10 pozisyon): {{ pr.book.n }} işlem, %{{ tn(pr.book.win, 1) }}{% endif %}{% else %}Henüz kapanan kağıt işlem yok.{% endif %} · açık {{ pr.open }}
+    {% if pr.all.n and pr.all.n < 30 %}<span class="badge warn">n&lt;30: henüz anlamlı değil</span>{% endif %}</div>{% endif %}
+</section>
+{% endfor %}
+
+<section class="panel hsec" id="sinyaller">
+  <div class="sec-head"><h2>Bugünün sinyalleri</h2><span class="stamp"><span class="src">{% if sig %}{{ sig[0].sig_day|trdate }} kapanışı{% else %}henüz tarama yok{% endif %} · gece taraması</span></span></div>
+  {% if sig %}<div class="table-scroll"><table class="compact">
+    <tr><th>Hisse</th><th>Strateji</th><th class="num">Sinyal kapanışı</th><th>Emir (bir seans geçerli)</th><th>Durum</th><th>Defter</th></tr>
+    {% for t in sig %}<tr><td><a href="/h/{{ t.symbol }}"><b>{{ t.symbol }}</b></a> <span class="xs muted">{{ t.company or '' }}{% if t.tier == 'kesif' %} · keşif{% endif %}</span></td>
+      <td>{{ t.strategy_name }}</td><td class="num">{{ tn(t.close) }}</td>
+      <td>{% if t.limit_px %}limit alış <b>{{ tn(t.limit_px) }} $</b> (kapanışın %{{ tn((1 - t.limit_px / t.close) * 100, 0) }} altı){% else %}açılışta alış{% endif %}</td>
+      <td>{{ {'pending': 'bekliyor', 'open': 'pozisyonda', 'closed': 'kapandı', 'lapsed': 'limit dolmadı'}.get(t.status, t.status) }}</td>
+      <td>{% if t.in_book %}<span class="badge pos">defterde</span>{% else %}<span class="xs muted">yer yok</span>{% endif %}</td></tr>{% endfor %}
+  </table></div>
+  {% else %}<div class="muted small">Son taramada sinyal yok. Bu stratejiler yalnızca güçlü trenddeki bir hisse kısa sürede sert satıldığında devreye girer; sinyal çıkmayan günler normaldir.</div>{% endif %}
+  <div class="xs muted" style="margin-top:6px">Sinyaller ABD kapanışından sonra hesaplanır. Bunlar alım tavsiyesi değil, testte ölçülen kuralın bugünkü çıktısıdır; kağıt defter bunları otomatik olarak izler.</div>
+</section>
+
+<section class="panel hsec" id="acik">
+  <div class="sec-head"><h2>Açık kağıt işlemler ({{ open_tr|length }})</h2></div>
+  {% if open_tr %}<div class="table-scroll"><table class="compact">
+    <tr><th>Hisse</th><th>Strateji</th><th>Giriş günü</th><th class="num">Giriş</th><th class="num">Son</th><th class="num">K/Z</th><th class="num">Gün</th><th>Not</th></tr>
+    {% for t in open_tr %}<tr><td><a href="/h/{{ t.symbol }}"><b>{{ t.symbol }}</b></a>{% if t.in_book %} <span class="badge pos">defter</span>{% endif %}</td><td>{{ t.strategy_name }}</td><td>{{ t.entry_day|trdate }}</td>
+      <td class="num">{{ tn(t.entry_px) }}</td><td class="num">{{ tn(t.last_px) }}</td><td class="num {{ (t.ret or 0)|sgn }}">{{ tp(t.ret, 2) }}</td><td class="num">{{ t.held or '—' }}</td>
+      <td class="small">{% if t.exit_next %}çıkış kuralı tetiklendi: sonraki açılışta satış{% endif %}</td></tr>{% endfor %}
+  </table></div>{% else %}<div class="muted small">Açık kağıt işlem yok.</div>{% endif %}
+</section>
+
+<section class="panel hsec" id="kapanan">
+  <div class="sec-head"><h2>Kapanan kağıt işlemler</h2></div>
+  {% if closed_tr %}<div class="table-scroll"><table class="compact">
+    <tr><th>Hisse</th><th>Strateji</th><th>Giriş</th><th>Çıkış</th><th class="num">Giriş $</th><th class="num">Çıkış $</th><th class="num">Net</th><th>Neden</th></tr>
+    {% for t in closed_tr %}<tr><td><a href="/h/{{ t.symbol }}"><b>{{ t.symbol }}</b></a>{% if t.in_book %} <span class="badge pos">defter</span>{% endif %}</td><td>{{ t.strategy_name }}</td>
+      <td>{{ t.entry_day|trdate }}</td><td>{{ t.exit_day|trdate }}</td><td class="num">{{ tn(t.entry_px) }}</td><td class="num">{{ tn(t.exit_px) }}</td>
+      <td class="num {{ (t.ret or 0)|sgn }}"><b>{{ tp(t.ret, 2) }}</b></td><td class="small">{{ {'signal': 'çıkış kuralı', 'time': 'süre doldu', 'stop': 'stop'}.get(t.why, t.why) }}</td></tr>{% endfor %}
+  </table></div>{% else %}<div class="muted small">Henüz kapanan kağıt işlem yok. İlk sonuçlar birkaç gün içinde gelir.</div>{% endif %}
+</section>
+
+<details class="explain"><summary>Bu sonuçlara ne kadar güvenebilirim?</summary>
+  <p><b>Seçim / sınav ayrımı:</b> Kurallar yalnızca 2006–2016 verisine bakılarak seçildi. 2017 → bugün dönemi seçimde hiç kullanılmadı; tablodaki "Sınav dönemi" satırı, kuralın görmediği veride ne yaptığını gösterir.</p>
+  <p><b>Maliyet:</b> Her işleme gidiş-dönüş %{{ tn(res.cost_rt, 2) }} kayma + komisyon düşüldü; son sütun bu maliyetin iki katıyla sonucu gösterir.</p>
+  <p><b>Gerçekçi emir:</b> Sinyal kapanışta görülür, alış ertesi seansta yapılır (açılış ya da o seans için geçerli limit emir). Satış da çıkış kuralının tetiklendiği kapanıştan sonraki açılışta yapılır.</p>
+  {% if res.universe_mode == 'pit' and res.gap %}{% set gs = res.gap.status %}{% set miss = (gs.get('delisted') or {}).get('share_days', 0) + (gs.get('unmatched') or {}).get('share_days', 0) %}
+  <p><b>Hayatta kalma yanlılığı:</b> Test her gün yalnızca o gün S&amp;P 500'de olan hisselerde sinyal arar; sonradan endeksten çıkan ama hâlâ işlem gören şirketler de dahildir (üyelik geçmişi: github.com/fja05680/sp500, {{ res.gap.csv_through|trdate }}'e kadar, sonrası bugünkü listeyle tamamlandı).
+    Kalan boşluk: 2006'dan beri endekse girmiş şirketlerden <b>{{ (gs.get('delisted') or {}).get('names', 0) }}</b>'i borsadan tamamen çekildi (satın alma ya da iflas) ve ücretsiz fiyatı yok; bu, üye-günlerin <b>%{{ tn(miss, 1) }}</b>'i demek. Bu şirketlerin bir kısmı çöküşle çıktığı için sonuçlar hâlâ biraz iyimser olabilir. Kağıt defterin canlı sicili bu yanlılığı taşımaz.</p>
+  {% else %}
+  <p><b>Bilinen yanlılık:</b> Hisse listesi bugünkü S&amp;P 500 ve 400 üyeleridir. Geçmişte çöküp endeksten çıkan şirketler testte yok; bu, düşüşte alım yapan stratejileri olduğundan iyi gösterir. Kağıt defterin canlı sicili bu yanlılığı taşımaz; asıl karşılaştırma odur.</p>
+  {% endif %}
+  <p><b>Stres testleri:</b> Seçim / sınav ayrımı tek başına yetmez. Her strateji ayrıca maliyet taramasından, her başlangıç günü testinden, ayar sıralamasından ve binlerce rastgele stratejiyle karşılaştırmadan geçer. Eşikler sonuçlar görülmeden önce yazıldı; dördünü birden geçemeyen strateji reddedilir. Her ayın ilk pazarı yeni verilerle yeniden sınanır.</p>
+  <p><b>Stop yok:</b> Bu stratejilerde sabit zarar kes yerine süre sınırı vardır; testte stop eklemek başarı oranını ve getiriyi düşürdü. Bunun bedeli seyrek ama büyük kayıplardır (tablodaki "en kötü işlem").</p>
+</details>
+{% endif %}
+<div class="xs muted" style="margin:10px 0">Bu sayfa kişisel araştırma içindir, yatırım tavsiyesi değildir. Geçmiş performans gelecekteki sonuçları garanti etmez.</div>
+{% endblock %}

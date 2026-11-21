@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Hisselerim · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:2px">Hisselerim</h1>
+    <p class="lede">Portföydeki ve izlediğin hisseler tek listede. Takipteki her hisse için radar haber, analist notu ve SEC dosyalarını toplar; önemli olanları Telegram'a yollar.</p>
+  </div>
+</div>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+{% if unwatched %}<div class="flash err">Portföyde olup takipte olmayan: {% for p in unwatched %}<b>{{ p.symbol }}</b>{% if not loop.last %}, {% endif %}{% endfor %}.
+  <form method="post" action="/tickers/add" class="inline"><input type="hidden" name="symbols" value="{{ unwatched|map(attribute='symbol')|join(' ') }}"><button class="sm">Hepsini takibe al</button></form></div>{% endif %}
+<div class="panel" style="margin-bottom:12px">
+  <form method="post" action="/tickers/add" class="filters" style="margin:0">
+    <input name="symbols" placeholder="Sembol(ler): AMD, TSLA" required style="min-width:220px" autocapitalize="characters">
+    <input name="notes" placeholder="Not (opsiyonel)">
+    <button>+ İzlemeye ekle</button>
+    <span class="muted small">İlk taramada geçmiş haberler sessizce yüklenir; sonra yeni gelişmeler bildirilir. Portföye giren hisseler otomatik eklenir (Ayarlar → watch_holdings).</span>
+  </form>
+</div>
+<div class="panel table-scroll">
+<table class="compact">
+  <tr><th>Sembol</th><th>Şirket</th><th class="num">Fiyat</th><th class="num">Gün</th><th class="num">Portföy</th><th>Karne</th><th>Setup</th><th>Bildirim eşiği</th><th>Durum</th><th></th></tr>
+  {% for r in rows %}{% set q = quotes.get(r.symbol, {}) %}
+  <tr style="{{ 'opacity:.5' if not r.active }}">
+    <td><a href="/h/{{ r.symbol }}"><b>{{ r.symbol }}</b></a></td>
+    <td>{{ r.name }}{% if r.notes %}<br><span class="muted xs">{{ r.notes }}</span>{% endif %}</td>
+    <td class="num">{{ q.price|money if q.price else '—' }}</td>
+    <td class="num {{ q.change_pct|sgn }}">{{ q.change_pct|pct if q.price else '' }}</td>
+    <td class="num">{% if r.pos %}{{ r.pos.value|usd }} <span class="xs {{ r.pos.unreal_pct|sgn }}">{{ r.pos.unreal_pct|pct }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+    <td>{% if r.karne %}<a class="band {{ r.karne.tone }}" href="/h/{{ r.symbol }}/karne">{{ r.karne.overall|round|int }}</a>{% else %}<a class="xs" href="/h/{{ r.symbol }}/karne">oluştur</a>{% endif %}</td>
+    <td>{% if r.setup %}<a class="chip" href="/setups#c{{ r.setup.id }}">{{ r.setup.name_tr }} · {{ r.setup.status_tr }}</a>{% endif %}</td>
+    <td>
+      <form method="post" action="/tickers/{{ r.symbol }}/threshold" class="inline">
+        <select name="threshold" onchange="this.form.submit()">
+          <option value="" {% if not r.alert_threshold %}selected{% endif %}>varsayılan ({{ default_threshold }})</option>
+          {% for i in [1,2,3,4,5] %}<option value="{{ i }}" {% if r.alert_threshold == i %}selected{% endif %}>≥ {{ i }}</option>{% endfor %}
+        </select>
+      </form>
+    </td>
+    <td class="small">{{ '✓ takipte' if r.active else 'pasif' }}{% if r.active and not r.backfilled_at %} <span class="muted">(ilk tarama…)</span>{% endif %}</td>
+    <td style="white-space:nowrap">
+      <form method="post" action="/tickers/{{ r.symbol }}/toggle" class="inline"><button class="secondary sm">{{ 'Durdur' if r.active else 'Aktifleştir' }}</button></form>
+      <form method="post" action="/tickers/{{ r.symbol }}/delete" class="inline" onsubmit="return confirm('{{ r.symbol }} ve tüm geçmişi silinsin mi?')"><button class="danger sm">Sil</button></form>
+    </td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="muted small">Telegram'dan da yönetebilirsin: Hermes'e <i>"AMD'yi listeye ekle"</i>, <i>"EOSE'yi çıkar"</i>, <i>"listemde ne var?"</i>, <i>"NVDA karnesi ne?"</i></p>
+{% endblock %}

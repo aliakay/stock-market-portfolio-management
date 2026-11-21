@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ e.title[:60] }} · Borsa Radar{% endblock %}
+{% block content %}
+<div class="panel">
+  <div class="card {{ e.direction|dir_cls }}" style="margin:0;border-top:0;border-right:0;border-bottom:0">
+    <div class="meta">
+      <span class="badge type">{{ e.type|type_tr }}</span>
+      {% if e.importance %}<span class="badge imp{{ e.importance }}">önem {{ e.importance }}/5</span>{% endif %}
+      {% for s in syms %}<a class="badge sym" href="/h/{{ s }}">{{ s }}</a>{% endfor %}
+      <span>{{ e.published_at|local('%d.%m.%Y %H:%M') }} ({{ e.published_at|ago }})</span>
+      <span>{{ e.source }}</span>
+      {% if e.category %}<span class="badge">{{ e.category }}</span>{% endif %}
+    </div>
+    <h1>{{ e.direction|dir_icon }} {{ e.title }}</h1>
+    {% if e.summary_tr %}<p class="sum">{{ e.summary_tr }}</p>{% endif %}
+    {% if e.reasoning_tr %}<p class="why" style="white-space:pre-line">{{ e.reasoning_tr }}</p>{% endif %}
+    {% if extra.sentiment %}<p>Duygu (Marketaux): {% for k, v in extra.sentiment.items() if v is not none %}<span class="badge sentiment {{ 'pos' if v > 0 else 'neg' if v < 0 else 'neu' }}">{{ k }} {{ '%+.2f'|format(v) }}</span> {% endfor %}</p>{% endif %}
+    {% if impact %}<p>Portföy etkisi: {% for s, v in impact.items() %}<a class="badge sym" href="/h/{{ s }}">{{ s }} {{ v|int|dir_icon }}</a> {% endfor %}</p>{% endif %}
+    {% if e.url %}<p><a href="{{ e.url }}" target="_blank" rel="noopener">Kaynağa git ↗</a></p>{% endif %}
+    {% if e.status in ('backfill', 'irrelevant') and e.type != 'rating' %}
+      <form method="post" action="/e/{{ e.id }}/analyze"><button>🤖 Şimdi analiz et</button>
+      {% if request.query_params.get('analyzing') %}<span class="muted"> analiz ediliyor, ~30 sn sonra sayfayı yenileyin…</span>{% endif %}</form>
+    {% endif %}
+  </div>
+</div>
+
+<h2>🔍 Derin bakış</h2>
+<div class="panel">
+{% if research and research.status == 'done' %}
+  {% if research.expectation %}<div class="expectation">{{ research.expectation }}</div>{% endif %}
+  <div style="white-space:pre-line;margin-top:10px">{{ research.content }}</div>
+  {% if research.sources %}<h3>Kaynaklar</h3><ul>{% for s in research.sources %}<li><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title or s.url }}</a></li>{% endfor %}</ul>{% endif %}
+  <div class="muted">{{ research.model }}{% if research.done_at %} · {{ research.done_at|local }}{% endif %}</div>
+{% elif research and research.status in ('queued','running') %}<div class="muted">araştırılıyor…</div>
+{% elif research and research.status == 'failed' %}<div class="neg">{{ research.error }}</div><form method="post" action="/e/{{ e.id }}/research"><button>Yeniden dene</button></form>
+{% else %}<form method="post" action="/e/{{ e.id }}/research"><button>🔍 Web'de derin araştır</button></form>{% endif %}
+</div>
+
+{% if reactions %}
+<h2>Fiyat tepkisi</h2>
+<div class="panel">
+<table>
+  <tr><th>Enstrüman</th><th class="num">Olay anı</th><th class="num">+15 dk</th><th class="num">+1 saat</th><th class="num">+1 gün</th></tr>
+  {% for r in reactions %}
+  <tr>
+    <td>{{ instruments.get(r.symbol, r.symbol) }} <span class="muted">{{ r.symbol }}</span></td>
+    <td class="num">{{ r.price_t0|money }}</td>
+    {% for v in [r.chg_15m, r.chg_1h, r.chg_1d] %}
+    <td class="num {{ 'pos' if v and v > 0 else 'neg' if v and v < 0 else 'muted' }}">{{ v|pct }}</td>
+    {% endfor %}
+  </tr>
+  {% endfor %}
+</table>
+<div class="muted" style="font-size:12px;margin-top:6px">5 dakikalık barlarla (açılış öncesi/sonrası dahil) ölçülür. ^TNX faizdir (% değişim), ^VIX volatilite endeksi.</div>
+</div>
+{% endif %}
+
+{% if extra %}
+<h2>Detaylar</h2>
+<div class="panel kv">
+  {% for k, v in extra.items() if k not in ('manual','llm_fail') %}<span class="muted">{{ k }}</span><span>{{ v }}</span>{% endfor %}
+</div>
+{% endif %}
+
+{% if e.body %}
+<h2>Metin</h2>
+<pre>{{ e.body[:4000] }}</pre>
+{% endif %}
+
+<h2>Hermes'e sor</h2>
+<div class="panel muted">
+  Telegram'da Troia Agent'a yaz: <code>#e{{ e.id }} gelişmesini derin analiz et, {{ syms|join(', ') or 'piyasa' }} için ne anlama geliyor?</code>
+</div>
+{% endblock %}

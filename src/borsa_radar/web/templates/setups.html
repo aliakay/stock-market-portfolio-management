@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block title %}Setup'lar · Borsa Radar{% endblock %}
+{% macro ladder(c) %}{% set y = c.ly %}
+<svg class="ladder" viewBox="0 0 120 150" preserveAspectRatio="none" aria-label="Seviye merdiveni">
+  <rect x="0" y="{{ y.t2 }}" width="120" height="{{ y.entry_hi - y.t2 }}" fill="#3fb95014"/>
+  <rect x="0" y="{{ y.entry_lo }}" width="120" height="{{ y.stop - y.entry_lo }}" fill="#f8514914"/>
+  <rect x="0" y="{{ y.entry_hi }}" width="120" height="{{ [y.entry_lo - y.entry_hi, 1.5]|max }}" fill="#58a6ff55"/>
+  {% for k, col, lab in [('t2', '#3fb950', 'H2'), ('t1', '#3fb950', 'H1'), ('stop', '#f85149', 'Stop')] %}
+  <line x1="0" x2="120" y1="{{ y[k] }}" y2="{{ y[k] }}" stroke="{{ col }}" stroke-width="1" stroke-dasharray="3 2"/>
+  <text x="2" y="{{ y[k] - 2 }}" fill="{{ col }}" font-size="9">{{ lab }}</text>{% endfor %}
+  <text x="2" y="{{ y.entry_hi - 2 }}" fill="#58a6ff" font-size="9">Giriş</text>
+  <circle cx="100" cy="{{ y.px }}" r="3" fill="#e6edf3"/><text x="70" y="{{ y.px + 3 }}" fill="#8b949e" font-size="8">son</text>
+</svg>
+{% endmacro %}
+{% block content %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Günün Setup'ları</h1>
+    <div class="stamp">Baz gün (T): <b>{{ r.day or '—' }}</b> kapanışı · {{ r.universe_n }} isim tarandı (portföy + izleme listesi + havuz{% if r.wide %} + keşif: {{ r.wide.lists|join(', ') }}{% endif %})
+      {% if r.ran_at %}· tarandı {{ r.ran_at|local('%d.%m %H:%M') }}{% endif %} · kurallar {{ rules_ver }}
+      {% if r.regime %}· <a href="/piyasa" class="chip">Rejim: {{ r.regime }}{% if r.regime_score is not none %} {{ r.regime_score|round|int }}{% endif %}</a>{% endif %}</div>
+  </div>
+  <form method="post" action="/setups/run">{% if running %}<button disabled>Taranıyor…</button>{% else %}<button class="secondary">Yeniden tara</button>{% endif %}</form>
+</div>
+{% if running %}<meta http-equiv="refresh" content="8">{% endif %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+<div class="xs muted" style="margin:4px 0 8px">Bu sayfadaki grafik kalıpları (geri çekilme, kırılım, bayrak…) 20 bin+ geçmiş örnekte ölçülmüş bir avantaj göstermedi; burada fikir listesidir.
+  20 yıllık veride sınanmış, kağıt üzerinde canlı izlenen kurallar için: <a href="/setups/strateji">Strateji laboratuvarı →</a></div>
+
+{% if r.open %}
+<section class="panel hsec">
+  <div class="sec-head"><h2>Açık setupların durumu</h2><span class="stamp"><span class="src">sunucu takibi · kapanış bazlı</span></span></div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Setup</th><th>Verildiği gün</th><th>Durum</th><th class="num">Giriş bandı</th><th class="num">Stop</th><th class="num">Hedef 1</th><th>Geçerlilik</th></tr>
+    {% for o in r.open %}<tr><td><a href="/h/{{ o.symbol }}"><b>{{ o.symbol }}</b></a> · {{ o.name_tr }}</td><td>{{ o.day|trdate }}</td>
+      <td class="{{ 'pos' if o.status in ('triggered','t1') else '' }}"><b>{{ o.status_tr }}</b>{% if o.trig_px %} @{{ tn(o.trig_px) }}{% endif %}</td>
+      <td class="num">{{ tn(o.entry_lo) }}–{{ tn(o.entry_hi) }}</td><td class="num">{{ tn(o.stop) }}</td><td class="num">{{ tn(o.t1) }}</td><td>{{ o.valid_until|trdate }}</td></tr>{% endfor %}
+  </table></div>
+  <div class="xs muted">Tetik = giriş bandının alt sınırı üstünde günlük kapanış. Tetik öncesi stop altında kapanış setup'ı iptal eder.</div>
+</section>
+{% endif %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Karar ekranı</h2></div>
+  <div class="result {{ 'pos' if r.cards else 'neu' }}"><span class="lbl">Sonuç</span> {{ r.summary or '—' }}</div>
+  <div class="xs muted" style="margin-top:4px">Özet: {{ r.summary_model or 'şablon' }}. Model yalnızca verilen sayıları kullanabilir; aksi hâlde şablon cümle yazılır.</div>
+  <div class="chips" style="margin-top:10px"><span class="chip"><b>{{ r.cards|length }}</b> / {{ max_cards }} setup kalite eşiğini geçti</span>
+    {% for c in r.cards %}<a class="chip {{ c.tone }}" href="#c{{ c.id }}">{{ c.symbol }} · {{ c.name_tr }} · 1:{{ tn(c.rr, 1) }}</a>{% endfor %}</div>
+</section>
+
+{% macro setup_card(c, rank, best=false) %}
+<section class="panel hsec setup-card" id="c{{ c.id }}">
+  <div class="sc-head">
+    <div><span class="sc-rank">#{{ rank }}</span> <a href="/h/{{ c.symbol }}" class="sc-sym">{{ c.symbol }}</a>
+      {% if c.company %}<span class="small">{{ c.company }}</span>{% endif %}
+      <span class="badge">{{ c.src }}</span>{% if c.sector %} <span class="badge">{{ c.sector }}</span>{% endif %}{% if best %} <span class="badge pos">EN İYİ</span>{% endif %}
+      <span class="{{ c.ind.chg1|sgn }} small">{{ tp(c.ind.chg1, 2) }} son seans</span></div>
+    <div class="sc-type"><b>{{ c.name_tr }}</b> <span class="muted small">{{ c.name_en }}</span> <span class="band {{ c.tone }}">{{ c.strength }} · {{ c.quality|round|int }}</span></div>
+  </div>
+  <div class="result {{ c.tone if c.tone != 'warn' else '' }}">{{ c.status_line }}</div>
+  <div class="sc-body">
+    {{ ladder(c) }}
+    <div class="sc-levels">
+      <div class="lv"><span class="lbl">Giriş</span><b>{{ tn(c.entry_lo) }}–{{ tn(c.entry_hi) }} $</b><span class="xs muted">{{ c.entry_why }}</span></div>
+      <div class="lv"><span class="lbl">Stop</span><b class="neg">{{ tn(c.stop) }} $</b><span class="xs muted">{{ tp((c.stop / c.entry - 1) * 100) }} · {{ c.stop_why }}</span></div>
+      <div class="lv"><span class="lbl">Hedef 1</span><b class="pos">{{ tn(c.t1) }} $</b><span class="xs muted">{{ tp((c.t1 / c.entry - 1) * 100) }} · {{ c.t1_why }}</span></div>
+      <div class="lv"><span class="lbl">Hedef 2</span><b class="pos">{{ tn(c.t2) }} $</b><span class="xs muted">{{ tp((c.t2 / c.entry - 1) * 100) }} · {{ c.t2_why }}</span></div>
+      <div class="lv"><span class="lbl">R:R (ağırlıklı)</span><b>1:{{ tn(c.rr, 1) }}</b><span class="xs muted">yarısı H1'de, yarısı H2'de</span></div>
+      <div class="lv"><span class="lbl">Geçerlilik</span><b>{{ c.valid_until|trdate }}</b><span class="xs muted">kapanışa kadar; tetik gelmezse iptal</span></div>
+    </div>
+  </div>
+  <div class="xs muted">RSI(14) {{ tn(c.ind.rsi, 1) }} · EMA20 {{ tn(c.ind.ema20) }} $ · EMA50 {{ tn(c.ind.ema50) }} $ · SMA200 {{ tn(c.ind.sma200) }} $ · ATR(14) {{ tn(c.ind.atr) }} $ ·
+    Hacim {{ tn(c.ind.vol / 1e6, 1) }} M (20g ort. {{ tn(c.ind.vol20 / 1e6, 1) }} M){% if c.band %} · Bant {{ tn(c.band[0]) }}–{{ tn(c.band[1]) }} $ ({{ c.band_days }} gün){% endif %}</div>
+  <p class="small"><b>Tetik:</b> {{ c.trigger }}</p>
+  <p class="small"><b>Playbook:</b> {{ c.playbook }}</p>
+  <p class="small"><b>Opsiyon:</b> {{ c.opt_idea }}{% if c.opt_held %}<br><span class="warn">Portföyde bu isimde opsiyon var: {% for p in c.opt_held %}{{ p.symbol }} × {{ p.qty|qty }}{% if not loop.last %}, {% endif %}{% endfor %} — aynı hissede ikinci bir kaldıraçlı maruziyet.</span>{% endif %}</p>
+  {% for w in c.warnings %}<div class="flash err small">⚠️ {{ w }}</div>{% endfor %}
+  <p class="lede small" style="margin:6px 0 0"><b>Yani:</b> {{ c.yani }}</p>
+</section>
+{% endmacro %}
+{% for c in r.cards %}{{ setup_card(c, loop.index, loop.first) }}
+{% else %}
+<div class="panel empty-state"><h3>Kendi listende bugün kalite eşiğini geçen setup yok</h3><p class="muted">Bu da bir sonuç: zorlama giriş yerine beklemek. Aşağıda her ismin neden elendiği yazıyor.</p></div>
+{% endfor %}
+
+{% if r.wide or r.discovery %}
+<section class="panel hsec" id="kesif">
+  <div class="sec-head"><h2>Keşif: listende olmayan hisseler</h2><span class="stamp"><span class="src">{{ (r.wide.lists if r.wide else [])|join(' + ') }} bileşenleri (Wikipedia listesi) · Yahoo günlük kapanış</span></span></div>
+  {% if r.wide %}<div class="result {{ 'pos' if r.discovery else 'neu' }}"><span class="lbl">Sonuç</span>
+    Portföyünde ve izleme listende olmayan <b>{{ r.wide.n }}</b> şirket aynı kurallarla tarandı; <b>{{ r.wide.found or 0 }}</b> tanesinde kalite eşiğini geçen kurulum var.
+    {% if r.discovery %}Kalite puanı en yüksek {{ r.discovery|length }} tanesi aşağıda (kalite ≥ {{ disc_min }}, sektör başına en fazla {{ disc_sector }}).{% else %}Hiçbiri kalite ≥ {{ disc_min }} eşiğine ulaşmadı; bu yüzden kart gösterilmiyor.{% endif %}</div>
+  {% set dr = r.discovery_record %}
+  {% if dr and dr.picks and dr.picks.n %}<div class="flash {{ 'err' if (dr.picks.exp_r - dr.picks.ci) <= 0 else '' }} small" style="margin-top:8px">
+    <b>Ölçülmüş sicil (geriye dönük test, {{ dr.from|trdate }} – {{ dr.to|trdate }}, {{ dr.symbols }} şirket):</b>
+    bu seçim kuralının göstereceği {{ tn(dr.picks.n, 0) }} kurulumda isabet %{{ tn(dr.picks.hit, 0) }}, işlem başı beklenti {{ tn(dr.picks.exp_r, 2) }}R (±{{ tn(dr.picks.ci, 2) }});
+    keşifte eşiği geçen tüm {{ tn(dr.all.n, 0) }} kurulumda isabet %{{ tn(dr.all.hit, 0) }}, beklenti {{ tn(dr.all.exp_r, 2) }}R (±{{ tn(dr.all.ci, 2) }}).
+    {% if (dr.picks.exp_r - dr.picks.ci) <= 0 %}Yani bu kuralların geniş evrende ölçülmüş bir avantajı yok ve yüksek kalite puanı daha iyi sonuç anlamına gelmiyor: aşağıdakiler alım adayı değil, bakılacak isim listesi.{% endif %}
+    <span class="muted">Test bugünkü endeks üyeleriyle yapıldı (hayatta kalan yanlılığı sonucu olduğundan iyi gösterir), işlem maliyeti yok.</span></div>
+  {% elif r.wide %}<div class="xs muted" style="margin-top:6px">Bu seçim kuralının sicili henüz ölçülmedi: <code>borsa-radar setups backfill --wide</code>.</div>{% endif %}
+  <div class="xs muted" style="margin-top:4px">Kurulum çıkmayanlar: {% for k, v in r.wide.why|dictsort(by='value', reverse=true) %}{{ k }} {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}{% if r.wide.no_data %} · fiyat verisi yok {{ r.wide.no_data }}{% endif %}.
+    Bu isimler için haber, tez ve karne takibi yok; beğendiğini izleme listene eklersen radar toplamaya başlar. Durum değişiklikleri Telegram'a gönderilmez.</div>
+  {% endif %}
+  {% if r.discovery %}<div class="chips" style="margin-top:10px">{% for c in r.discovery %}<a class="chip {{ c.tone }}" href="#c{{ c.id }}">{{ c.symbol }} · {{ c.name_tr }} · 1:{{ tn(c.rr, 1) }}</a>{% endfor %}</div>{% endif %}
+</section>
+{% for c in r.discovery %}{{ setup_card(c, loop.index) }}{% endfor %}
+{% if r.discovery_rest %}<details class="more"><summary>Keşifte eşiği geçen diğer kurulumlar ({{ r.discovery_n - r.discovery|length }}{% if r.discovery_n - r.discovery|length > r.discovery_rest|length %}, ilk {{ r.discovery_rest|length }}{% endif %})</summary>
+  <div class="table-scroll"><table class="compact"><tr><th>Sembol</th><th>Şirket</th><th>Sektör</th><th>Kurulum</th><th class="num">Kalite</th><th class="num">Giriş</th><th class="num">Stop</th><th class="num">Hedef 1</th><th class="num">R:R</th></tr>
+  {% for c in r.discovery_rest %}<tr><td><a href="/h/{{ c.symbol }}"><b>{{ c.symbol }}</b></a></td><td class="small">{{ c.company or '—' }}</td><td class="small muted">{{ c.sector or '—' }}</td><td>{{ c.name_tr }}</td>
+    <td class="num">{{ c.quality|round|int }}</td><td class="num">{{ tn(c.entry_lo) }}–{{ tn(c.entry_hi) }}</td><td class="num">{{ tn(c.stop) }}</td><td class="num">{{ tn(c.t1) }}</td><td class="num">1:{{ tn(c.rr, 1) }}</td></tr>{% endfor %}
+  </table></div>
+</details>{% endif %}
+{% endif %}
+
+<details class="explain"><summary>Daha basit anlat: Risk-ödül (R:R) oranı nedir?</summary>
+  <p>Bir işlemde göze aldığın zarara karşılık hedeflediğin kazancın kaç katı olduğu. 1:2 demek: 100 lira riske atıp 200 lira hedeflemek. Yüksek oran, işlemlerin yarısından azı tutsa bile uzun vadede kazançlı çıkmayı mümkün kılar. Burada eşik 1:{{ tn(min_rr, 1) }}; altındaki kurulumlar elenir.</p>
+  {% if r.cards %}<p><b>Bugün ne diyor?</b> {% for c in r.cards %}{{ c.symbol }}: {{ tn(c.entry - c.stop) }} $ risk karşılığında hedefler {{ tn(c.t1) }} $ ve {{ tn(c.t2) }} $ (1:{{ tn(c.rr, 1) }}){{ '; ' if not loop.last else '.' }}{% endfor %}</p>{% endif %}
+</details>
+<details class="explain"><summary>Daha basit anlat: Stop (zarar kes) seviyesi nedir?</summary>
+  <p>Tezin yanlış çıktığını kabul edip çıkacağın, ÖNCEDEN belirlenmiş fiyat. Amacı haklı çıkmak değil, tek bir işlemin portföye kalıcı zarar vermesini engellemektir. Önceden yazılmadıysa duygu karar verir; bu yüzden alım anında belirlenir.</p>
+  {% if r.cards %}<p><b>Bugün ne diyor?</b> {% for c in r.cards %}{{ c.symbol }} stop'u {{ tn(c.stop) }} $ (girişe göre {{ tp((c.stop / c.entry - 1) * 100) }}, {{ c.stop_why }}){{ '; ' if not loop.last else '.' }}{% endfor %}</p>{% endif %}
+</details>
+
+{% if r.weak %}<details class="more"><summary>Eşiğin altında kalan kurulumlar ({{ r.weak|length }})</summary>
+  <table class="compact">{% for c in r.weak %}<tr><td><a href="/h/{{ c.symbol }}">{{ c.symbol }}</a></td><td>{{ c.name_tr }}</td><td class="num">kalite {{ c.quality|round|int }}</td><td class="num">1:{{ tn(c.rr, 1) }}</td></tr>{% endfor %}</table>
+</details>{% endif %}
+
+<section class="panel hsec">
+  <div class="sec-head"><h2>Setup bulunamayan hisseler ({{ r.skipped|length }})</h2></div>
+  {% set down = r.skipped_down %}
+  {% for s in r.skipped_other %}<div class="evrow"><a href="/h/{{ s.symbol }}"><b>{{ s.symbol }}</b></a> <span class="xs muted">({{ s.src }})</span> <span class="small">{{ s.why }}</span></div>{% endfor %}
+  {% if down %}<div class="evrow"><span class="small"><b>Düşüş trendi içindekiler:</b> {% for s in down %}<a href="/h/{{ s.symbol }}">{{ s.symbol }}</a> {{ s.why_short }}{% if not loop.last %}, {% endif %}{% endfor %}</span></div>{% endif %}
+</section>
+
+<section class="panel hsec" id="sicil">
+  <div class="sec-head"><h2>Ölçülmüş sicil</h2><span class="stamp"><span class="src">setups tablosu · her koşuda yeniden hesaplanır</span></span></div>
+  {% for t, title, note in [(r.tr_live, 'Canlı', 'Taramanın gerçekten verdiği, kalite eşiğini geçen tüm setup\'lar (keşifte gösterilmeyenler dahil).'), (r.tr_bt, 'Geriye dönük test', 'Aynı kurallar son ~2 yılın her gününe uygulandı. Bugünkü tarama listesiyle yapıldığı için hayatta kalan hisse yanlılığı içerir; canlı sonuç değildir.')] %}
+  {% set a = t.all %}
+  <div class="ph" style="margin-top:10px">{{ title }} <span class="xs muted" style="text-transform:none;letter-spacing:0">— {{ note }}</span></div>
+  <div class="tiles">
+    <div class="tile"><div class="lbl">Sonuçlanan</div><div class="val">{{ a.decided }}</div><div class="sub muted">{{ a.n }} setup · {{ a.expired }} tetiklenmedi · {{ a.open }} açık</div></div>
+    <div class="tile"><div class="lbl">İsabet</div><div class="val">{{ '—' if a.hit is none else '%' ~ tn(a.hit, 1) }}</div><div class="sub muted">{{ a.hits }} hedef / {{ a.stops }} stop</div></div>
+    <div class="tile"><div class="lbl">Son 30 gün</div><div class="val">{{ '—' if t.last30.hit is none else '%' ~ tn(t.last30.hit, 1) }}</div><div class="sub muted">{{ t.last30.decided }} sonuçlanan</div></div>
+    <div class="tile"><div class="lbl">Ort. kazanç / kayıp</div><div class="val"><span class="pos">{{ tp(a.avg_win) }}</span></div><div class="sub neg">{{ tp(a.avg_loss) }}</div></div>
+    <div class="tile"><div class="lbl">Beklenen R / işlem</div><div class="val {{ (a.expectancy_r or 0)|sgn }}">{{ '—' if a.expectancy_r is none else tn(a.expectancy_r, 2) ~ 'R' }}</div><div class="sub muted">tetik oranı {{ '—' if a.trigger_rate is none else '%' ~ tn(a.trigger_rate, 0) }}</div></div>
+  </div>
+  {% if t.by_kind %}<table class="compact" style="margin-top:8px"><tr><th>Setup tipi</th><th class="num">Sonuçlanan</th><th class="num">İsabet</th><th class="num">Ort. R</th><th class="num">Zaman çıkışı</th><th class="num">Tetiklenmedi</th></tr>
+    {% for k in t.by_kind %}<tr><td>{{ k.name }}</td><td class="num">{{ k.decided }}</td><td class="num">{{ '—' if k.hit is none else '%' ~ tn(k.hit, 1) }}{% if k.decided < 20 %} <span class="badge warn">n&lt;20</span>{% endif %}</td>
+      <td class="num {{ (k.avg_r or 0)|sgn }}">{{ '—' if k.avg_r is none else tn(k.avg_r, 2) }}</td><td class="num">{{ k.times }}</td><td class="num">{{ k.expired }}</td></tr>{% endfor %}</table>
+  {% else %}<div class="muted small">Henüz sonuçlanan setup yok.</div>{% endif %}
+  {% if a.decided < 20 %}<div class="flash err small" style="margin-top:6px">Örnek küçük (n = {{ a.decided }} &lt; 20): oranlar gürültülü, yalnız yön fikri verir.</div>{% endif %}
+  {% endfor %}
+  <div class="xs muted" style="margin-top:8px">İsabet = Hedef 1'e ulaşan / (Hedef 1 + stop). Tetiklenmeden süresi dolanlar pay dışıdır. Takip kapanış bazlıdır: tetik = bandın alt sınırı üstünde kapanış (dolum o kapanıştan);
+    sonraki günlerde gün içi dip stop'a değerse stop, tepe hedefe değerse hedef sayılır; aynı gün ikisi birden olursa stop sayılır (temkinli). H1'de yarısı kapanır, stop başa başa çekilir; {{ hold_max }} seans sonunda kalan kapanıştan kapatılır.
+    Yalnız kalite ≥ {{ r.tr_live.min_quality|int }} kartlar sayılır.</div>
+  {% if r.closed %}<details class="more"><summary>Son sonuçlanan canlı setup'lar</summary><table class="compact">
+    {% for o in r.closed %}<tr><td>{{ o.day|trdate }}</td><td><a href="/h/{{ o.symbol }}">{{ o.symbol }}</a> · {{ o.name_tr }}</td><td>{{ o.status_tr }}</td><td class="num {{ (o.r_mult or 0)|sgn }}">{{ '' if o.r_mult is none else tn(o.r_mult, 2) ~ 'R' }}</td></tr>{% endfor %}</table></details>{% endif %}
+</section>
+<div class="xs muted" style="margin:10px 0">Bu sayfa kişisel araştırma içindir, yatırım tavsiyesi değildir. Seviyeler geçmiş fiyat verisinden kural tabanlı türetilmiştir. Kaynak: Yahoo günlük mumlar (radar fiyat deposu), radar takvimi, FMP bilanço tarihleri.</div>
+{% endblock %}

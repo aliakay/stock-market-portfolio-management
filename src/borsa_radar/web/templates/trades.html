@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% block title %}İşlemler · Borsa Radar{% endblock %}
+{% block content %}
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+{% if err %}<div class="flash err">{{ err }}</div>{% endif %}
+
+{% if result %}
+<div class="flash {{ 'err' if result.errors }}">
+  <b>{{ result.filename }}</b> — {% if result.dry_run %}deneme (kaydedilmedi){% else %}içe aktarıldı{% endif %}:
+  {{ result.rows }} satır · {{ result.trades }} işlem · {{ result.cash }} nakit hareketi · {{ result.duplicates }} tekrar (atlandı)
+  {% if result.first %}<br>Dönem: {{ result.first[:10] }} → {{ result.last[:10] }} · Semboller: {{ result.symbols | join(', ') }}{% endif %}
+  {% if result.skipped %}<br>Atlanan türler: {% for k, v in result.skipped.items() %}{{ k }} ×{{ v }}{% if not loop.last %}, {% endif %}{% endfor %}
+    <span class="muted">(bölünmeler Yahoo verisinden otomatik uygulanır)</span>{% endif %}
+  {% if result.unknown %}<details><summary>Tanınmayan {{ result.unknown | length }} satır — bunları bana gönder, eklerim</summary><pre>{{ result.unknown | join('\n') }}</pre></details>{% endif %}
+  {% if result.errors %}<details open><summary>{{ result.errors | length }} hata</summary><pre>{{ result.errors[:50] | join('\n') }}</pre></details>{% endif %}
+</div>
+{% endif %}
+
+<div class="pf-head">
+  <div>
+    <h1>İşlemler</h1>
+    <p class="lede muted">Hisse, opsiyon ve kripto tek akışta · {{ n }} kayıt · Sayfa {{ page }}/{{ pages }}</p>
+  </div>
+  <div class="stamp"><a href="#add">+ İşlem</a> · <a href="#cash">+ Nakit</a> · <a href="#import">Revolut CSV</a> · <a href="#subs">Alt portföyler</a></div>
+</div>
+
+<div class="tiles four">
+  <div class="tile"><div class="lbl">Bu ay işlem</div><div class="val">{{ stats.n }}</div><div class="sub muted">{{ stats.month }}</div></div>
+  <div class="tile"><div class="lbl">Alım / satım</div><div class="val"><span class="pos">{{ stats.buys }}</span> / <span class="neg">{{ stats.sells }}</span></div>
+    <div class="sub muted">{% if stats.n %}{{ 'Alım ağırlıklı' if stats.buys > stats.sells else 'Satış ağırlıklı' if stats.sells > stats.buys else 'Dengeli' }} ay{% endif %}</div></div>
+  <div class="tile"><div class="lbl">Realize K/Z (bu ay)</div><div class="val {{ stats.realized | sgn }}">{{ stats.realized | susd }}</div><div class="sub muted">{{ stats.sells }} satıştan</div></div>
+  <div class="tile"><div class="lbl">En aktif</div><div class="val">{{ stats.top[0] if stats.top else '—' }}</div><div class="sub muted">{% if stats.top %}{{ stats.top[1] }} işlem{% endif %}</div></div>
+</div>
+
+<form class="filters" method="get" action="/portfolio/trades">
+  <div class="tabs">
+    {% for k, l in [('', 'Tümü'), ('stock', 'Hisse'), ('option', 'Opsiyon'), ('crypto', 'Kripto')] %}
+      <a href="/portfolio/trades?asset={{ k }}&symbol={{ f.symbol }}&sub={{ f.sub }}" class="{{ 'active' if f.asset == k }}">{{ l }}</a>
+    {% endfor %}
+  </div>
+  <input type="hidden" name="asset" value="{{ f.asset }}">
+  <input name="symbol" value="{{ f.symbol }}" placeholder="sembol (örn. NVDA)" size="12">
+  <select name="sub"><option value="0">Tüm alt portföyler</option>{% for s in subs %}<option value="{{ s.id }}" {{ 'selected' if f.sub == s.id }}>{{ s.code }} {{ s.name }}</option>{% endfor %}</select>
+  <button class="secondary">Göster</button>
+</form>
+
+<div class="table-scroll">
+<table class="trades">
+  <tr><th>Tarih</th><th>Enstrüman</th><th>Alt</th><th>Yön</th><th class="num">Adet</th><th class="num">Fiyat</th><th class="num">Tutar</th><th class="num">Realize</th><th>Kaynak</th><th></th></tr>
+  {% for r in rows %}
+  <tr class="{{ 'has-note' if r.note }}">
+    <td>{{ r.ts | nyday }}</td>
+    <td><a href="/portfolio/trades?symbol={{ r.underlying or r.symbol }}"><b>{{ r.symbol }}</b></a>{% if r.asset != 'stock' %} <span class="badge">{{ r.asset }}</span>{% endif %}</td>
+    <td>{{ r.sub_code }}</td>
+    <td class="{{ 'pos' if r.side == 'BUY' else 'neg' }}"><b>{{ r.side }}</b></td>
+    <td class="num">{{ r.qty | qty }}{% if r.qty_after is defined %}<div class="muted xs">kalan {{ r.qty_after | qty }}{% if r.avg_after %} · ort {{ r.avg_after | usd2 }}{% endif %}{% if r.split_factor and r.split_factor != 1 %} · bölünme ×{{ r.split_factor | qty }}{% endif %}</div>{% endif %}</td>
+    <td class="num">{{ r.price | usd2 }}{% if r.currency != 'USD' %} <span class="muted xs">{{ r.currency }}</span>{% endif %}</td>
+    <td class="num">{{ r.amount | usd2 }}{% if r.fees %}<div class="muted xs">ücret {{ r.fees | usd2 }}</div>{% endif %}</td>
+    <td class="num {{ r.realized | sgn }}">{% if r.realized is defined and r.realized is not none %}{{ r.realized | susd }}<div class="xs">{{ r.realized_pct | pct }}</div>{% else %}—{% endif %}</td>
+    <td class="muted small">{{ 'manuel' if r.source == 'manual' else 'Revolut' if r.source == 'revolut_csv' else 'CSV' if r.source == 'csv' else r.source }}</td>
+    <td>
+      <details class="row-edit"><summary>✎</summary>
+        <form method="post" action="/portfolio/trades/{{ r.id }}/edit" class="stack">
+          <select name="sub">{% for s in subs %}<option value="{{ s.id }}" {{ 'selected' if s.code == r.sub_code }}>{{ s.code }} {{ s.name }}</option>{% endfor %}</select>
+          <textarea name="note" rows="2" placeholder="not">{{ r.note or '' }}</textarea>
+          <button class="sm">Kaydet</button>
+        </form>
+        <form method="post" action="/portfolio/trades/{{ r.id }}/delete" onsubmit="return confirm('#{{ r.id }} silinsin mi?')"><button class="danger sm">Sil</button></form>
+      </details>
+    </td>
+  </tr>
+  {% if r.note %}<tr class="note-row"><td colspan="10">{{ r.note }}</td></tr>{% endif %}
+  {% else %}
+  <tr><td colspan="10" class="empty">Kayıt yok. Aşağıdan işlem ekle ya da Revolut dökümünü içe aktar.</td></tr>
+  {% endfor %}
+</table>
+</div>
+{% if pages > 1 %}
+<div class="pager">
+  {% if page > 1 %}<a class="btn secondary sm" href="/portfolio/trades?asset={{ f.asset }}&symbol={{ f.symbol }}&sub={{ f.sub }}&page={{ page - 1 }}">← Önceki</a>{% endif %}
+  <span class="muted">{{ page }} / {{ pages }}</span>
+  {% if page < pages %}<a class="btn secondary sm" href="/portfolio/trades?asset={{ f.asset }}&symbol={{ f.symbol }}&sub={{ f.sub }}&page={{ page + 1 }}">Sonraki →</a>{% endif %}
+</div>
+{% endif %}
+
+<div class="forms">
+  <section class="panel" id="add">
+    <h3 class="ph">İşlem ekle</h3>
+    <form method="post" action="/portfolio/trades/add" class="form-grid">
+      <label>Yön<select name="side"><option>BUY</option><option>SELL</option></select></label>
+      <label>Sembol<input name="symbol" required placeholder="AMZN · BTC-USD · AMZN271217C00270000"></label>
+      <label>Adet<input name="qty" type="number" step="any" min="0" required></label>
+      <label>Fiyat<input name="price" type="number" step="any" min="0" required></label>
+      <label>Ücret<input name="fees" type="number" step="any" min="0" value="0"></label>
+      <label>Para birimi<input name="currency" value="USD" size="4"></label>
+      <label>Alt portföy<select name="sub">{% for s in subs %}<option value="{{ s.id }}">{{ s.code }} {{ s.name }}</option>{% endfor %}</select></label>
+      <label>Tarih/saat (Berlin)<input name="when" type="datetime-local"></label>
+      <label class="wide">Not<input name="note" placeholder="Neden aldım/sattım?"></label>
+      <div class="wide"><button>Ekle</button> <span class="muted xs">Opsiyon: OCC sembolü yaz (kök + YYAAGG + C/P + kullanım×1000, 8 hane); çarpan 100 otomatik.</span></div>
+    </form>
+  </section>
+
+  <section class="panel" id="cash">
+    <h3 class="ph">Nakit hareketi</h3>
+    <form method="post" action="/portfolio/cash/add" class="form-grid">
+      <label>Tür<select name="kind">
+        {% for k in ['deposit','withdrawal','dividend','interest','fee','adjustment'] %}<option value="{{ k }}">{{ kinds[k] }}</option>{% endfor %}
+        <option value="transfer">Alt portföyler arası transfer</option></select></label>
+      <label>Tutar<input name="amount" type="number" step="any" required></label>
+      <label>Para birimi<input name="currency" value="USD" size="4"></label>
+      <label>Alt portföy<select name="sub">{% for s in subs %}<option value="{{ s.id }}">{{ s.code }} {{ s.name }}</option>{% endfor %}</select></label>
+      <label>Transfer hedefi<select name="to_sub"><option value="">—</option>{% for s in subs %}<option value="{{ s.id }}">{{ s.code }} {{ s.name }}</option>{% endfor %}</select></label>
+      <label>Tarih/saat (Berlin)<input name="when" type="datetime-local"></label>
+      <label class="wide">Not<input name="note"></label>
+      <div class="wide"><button>Kaydet</button> <span class="muted xs">Düzeltme işaretli girilir (eksi = azaltır).</span></div>
+    </form>
+    {% if cash %}
+    <details><summary class="small">Son nakit hareketleri ({{ cash | length }})</summary>
+      <table class="compact">
+        {% for c in cash %}<tr><td>{{ c.ts | nyday }}</td><td>{{ c.sub_code }}</td><td>{{ c.kind_tr }}{% if c.symbol %} · {{ c.symbol }}{% endif %}</td>
+          <td class="num {{ c.amount | sgn }}">{{ c.amount | usd2 }}{% if c.currency != 'USD' %} {{ c.currency }}{% endif %}</td><td class="muted xs">{{ c.note or '' }}</td>
+          <td><form method="post" action="/portfolio/cash/{{ c.id }}/delete" onsubmit="return confirm('Silinsin mi?')"><button class="danger sm">×</button></form></td></tr>{% endfor %}
+      </table>
+    </details>
+    {% endif %}
+  </section>
+
+  <section class="panel" id="import">
+    <h3 class="ph">İşlem geçmişi içe aktar (CSV)</h3>
+    <ol class="small muted steps">
+      <li><b>Revolut:</b> uygulama → <b>Yatırım</b> → sağ üstte <b>···</b> → <b>Belgeler</b> → <b>Aracı kurum hesabı</b> → <b>Hesap dökümü</b> → tüm dönem → <b>Excel/CSV</b>.</li>
+      <li><b>Başka bir aracı kurum:</b> işlemlerini şu başlıkla bir CSV'ye yaz: <code>date,type,symbol,quantity,price,fees,amount,currency</code>.
+        <code>type</code>: BUY, SELL, DEPOSIT, WITHDRAWAL, DIVIDEND, INTEREST, FEE. Alım-satımda adet ve fiyat, nakit satırlarında tutar (amount) dolu olmalı.
+        Örnek: <code>2025-01-15,BUY,AAPL,10,185.20,1.00,,USD</code></li>
+      <li>Dosyayı aşağıdan yükle; biçim başlıktan anlaşılır. Aynı dosyayı tekrar yüklemek güvenli: daha önce eklenen satırlar atlanır.</li>
+    </ol>
+    <form method="post" action="/portfolio/import" enctype="multipart/form-data" class="form-grid">
+      <label class="wide">CSV dosyası<input type="file" name="file" accept=".csv,text/csv" required></label>
+      <label>Hedef alt portföy<select name="sub">{% for s in subs %}<option value="{{ s.id }}">{{ s.code }} {{ s.name }}</option>{% endfor %}</select></label>
+      <label class="check"><input type="checkbox" name="dry_run" value="1"> Önce dene (kaydetme)</label>
+      <div class="wide"><button>İçe aktar</button></div>
+    </form>
+    <p class="muted xs">Hepsi tek alt portföye gelir; sonra bir sembolün tüm işlemlerini başka alt portföye taşıyabilirsin:</p>
+    <form method="post" action="/portfolio/trades/move" class="filters">
+      <input name="symbol" placeholder="sembol" size="10" required>
+      <select name="sub">{% for s in subs %}<option value="{{ s.id }}">{{ s.code }} {{ s.name }}</option>{% endfor %}</select>
+      <button class="secondary sm">Taşı</button>
+    </form>
+  </section>
+
+  <section class="panel" id="subs">
+    <h3 class="ph">Alt portföyler</h3>
+    <table class="compact">
+      {% for s in subs %}
+      <tr><td><span class="dot" style="background:{{ s.color or '#8b949e' }}"></span><b>{{ s.code }}</b></td>
+        <td><form method="post" action="/portfolio/subs/{{ s.id }}/edit" class="filters">
+          <input name="name" value="{{ s.name }}" size="14"><input name="color" type="color" value="{{ s.color or '#8b949e' }}">
+          <button class="secondary sm">Kaydet</button></form></td></tr>
+      {% endfor %}
+    </table>
+    <form method="post" action="/portfolio/subs/add" class="filters">
+      <input name="code" placeholder="P3" size="4" required><input name="name" placeholder="Opsiyon" size="14" required>
+      <input name="color" type="color" value="#a371f7"><button class="sm">Ekle</button>
+    </form>
+  </section>
+</div>
+{% endblock %}

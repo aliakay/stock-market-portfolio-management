@@ -1,0 +1,281 @@
+{% extends "base.html" %}
+{% block title %}Piyasa · Rejim, Nabız, Rotasyon{% endblock %}
+{% macro simple(text) %}<details class="explain"><summary>Daha basit anlat</summary><p>{{ text }}</p></details>{% endmacro %}
+{% macro head(id, title, srcs) %}
+<div class="sec-head" id="{{ id }}"><h2>{{ title }}</h2><span class="stamp">{% for s in srcs %}<span class="src">{{ s }}</span>{% endfor %}</span></div>
+{% endmacro %}
+{% block content %}
+{% set r = rep.regime %}{% set P = rep.pulse %}{% set R = rep.rotation %}{% set B = rep.breadth %}
+<div class="pf-head">
+  <div>
+    <h1 style="margin-bottom:0">Piyasa</h1>
+    <div class="stamp">T = <b>{{ rep.day or '—' }}</b> kapanışı · tüm sayılar aynı T'den · oluşturuldu {{ rep.built_at.strftime('%d.%m %H:%M') }} · kurallar {{ r.rules_ver if r else '—' }}</div>
+  </div>
+  <form method="post" action="/piyasa/yenile"><button class="secondary sm">Yeniden hesapla</button></form>
+</div>
+{% if msg %}<div class="flash">{{ msg }}</div>{% endif %}
+
+{% if not r %}
+<div class="panel empty-state"><h3>Rejim hesaplanamadı</h3><p class="muted">Fiyat verisi yok veya yetersiz (SPY için en az 200 gün gerekir). Sunucuda <code>borsa-radar piyasa --refresh</code> çalıştır.</p></div>
+{% else %}
+
+<div class="strip">
+  <div class="strip-tile">
+    <div class="lbl">İklim · uzun vadeli zemin (yavaş değişir)</div>
+    <div class="val">{{ tn(r.climate, 1) }} <span class="muted small">/ 10</span></div>
+    <div class="small">{{ climate_label(r.climate) }}</div>
+  </div>
+  <div class="strip-tile">
+    <div class="lbl">Hava · 4 kısa vadeli gösterge (−8 … +8)</div>
+    <div class="val {{ 'pos' if r.weather > 0 else 'neg' if r.weather < 0 else '' }}">{{ '%+d'|format(r.weather) }}</div>
+    <div class="small">{{ weather_label(r.weather) }}</div>
+  </div>
+  <div class="strip-tile">
+    <div class="lbl">Genişlik puanı</div>
+    <div class="val">{{ tn(r.comps.breadth.score, 0) if r.comps.breadth else '—' }} <span class="muted small">/ 100</span></div>
+    <div class="small">{{ r.breadth_source or 'doğrulanamadı' }}</div>
+  </div>
+  <div class="strip-tile main {{ r.tone }}">
+    <div class="lbl">Rejim</div>
+    <div class="val">{{ r.label }}</div>
+    <div class="small">{{ tn(r.overall, 0) }} / 100</div>
+  </div>
+</div>
+<p class="lede" style="margin:10px 0 4px">{{ rep.summary|trnum }}</p>
+<div class="xs muted">Özet: {{ rep.summary_model }}. Model yalnızca bu sayfadaki sayıları kullanabilir; girdide olmayan bir sayı yazarsa metin reddedilir.</div>
+
+<nav class="sec-tabs" style="margin-top:12px"><a href="#rejim" class="{{ r.tone }}">Rejim</a><a href="#nabiz">Nabız</a><a href="#rotasyon">Rotasyon</a><a href="#genislik">Genişlik</a><a href="#sicil">Sicil</a></nav>
+
+{# ── Rejim ── #}
+<section class="panel hsec">
+  {{ head('rejim', 'Rejim', ['Yahoo günlük kapanış · T ' ~ rep.day, 'Genişlik: ' ~ (B.day if B else 'yok')]) }}
+  <div class="result {{ r.tone }}"><span class="lbl">Sonuç</span> Rejim <b>{{ r.label }}</b> ({{ tn(r.overall, 0) }}/100). {{ r.comps.values()|list|sort(attribute='score')|map(attribute='name')|list|last }} en güçlü, {{ r.comps.values()|list|sort(attribute='score')|map(attribute='name')|first }} en zayıf ayak.</div>
+  {% if r.missing %}<div class="missing">doğrulanamadı: {{ r.missing|join(', ') }} (ağırlıkları diğerlerine dağıtıldı)</div>{% endif %}
+  {{ simple("Piyasanın genel havası yedi ölçüyle puanlanır: trend, oynaklık, genişlik, kredi, katılım, getiri eğrisi ve dolar. Her biri 0-100; ağırlıklı ortalama etikete çevrilir. S&P 500 200 günlük ortalamasının altındaysa 'boğa' etiketi verilmez; VIX 30 üstündeyse etiket en fazla Risk-off olur. İklim yavaş değişen zemini, Hava ise son günlerin kısa vadeli dengesini gösterir.") }}
+  <div class="grid2" style="grid-template-columns:220px 1fr">
+    <div class="karne-score {{ r.tone }}" style="text-align:center">
+      <div class="ring" style="--p:{{ r.overall }}"><b>{{ tn(r.overall, 0) }}</b><span>/100</span></div>
+      <span class="band {{ r.tone }}">{{ r.label }}</span>
+      <div class="xs muted" style="margin-top:6px">≥70 Risk-on Boğa · 58 Temkinli Boğa · 45 Nötr · 32 Risk-off · altı Ayı</div>
+    </div>
+    <div>
+      <div class="ph">Hava · kısa vadeli 4 gösterge</div>
+      <table class="compact">{% for name, p in r.weather_parts %}<tr><td class="small">{{ name }}</td><td class="num {{ 'pos' if p > 0 else 'neg' if p < 0 else 'muted' }}">{{ '%+d'|format(p) }}</td></tr>{% endfor %}</table>
+      <div class="ph" style="margin-top:10px">Rejim puanı (son ~1 yıl)</div>
+      <div id="regchart" style="height:170px"></div>
+    </div>
+  </div>
+  <div class="dims" style="margin-top:12px">
+  {% for k, c in r.comps.items() %}
+    <div class="dim panel">
+      <div class="dim-head"><b>{{ c.name }}</b><span class="xs muted">ağırlık {{ c.weight }}</span><span class="dscore {{ c.tone }}">{{ tn(c.score, 0) }}</span></div>
+      <div class="meter"><div class="{{ c.tone }}" style="width:{{ c.score }}%"></div></div>
+      {% for w in c.why %}<div class="small">{{ w|trnum }}</div>{% endfor %}
+      <div class="xs trig">Ne değiştirir? {{ c.trigger|trnum }}</div>
+      <details class="explain"><summary>Daha basit anlat</summary><p>{{ c.explain }}</p></details>
+    </div>
+  {% endfor %}
+  </div>
+</section>
+
+{# ── Nabız ── #}
+<section class="panel hsec">
+  {{ head('nabiz', 'Nabız', ['Yahoo günlük kapanış · T ' ~ rep.day, 'Radar takvimi', 'Kalshi']) }}
+  <div class="result"><span class="lbl">Sonuç</span> {{ P.result|trnum }}</div>
+  {{ simple("Ana endeks fonlarının günlük durumu: fiyat, ortalamalar, RSI (0-100 hız göstergesi; 70 üstü aşırı hızlı, 30 altı aşırı satılmış) ve evre. Evre 2 yükseliş, 3 tepe/dengelenme, 4 düşüş, 1 tabandır; 30 haftalık (≈150 gün) ortalama ve eğimine göre belirlenir.") }}
+  <div class="idxgrid">
+  {% for c in P.indices %}{% if c.missing %}<div class="tile"><b>{{ c.symbol }}</b><div class="missing">doğrulanamadı</div></div>{% else %}
+    <div class="tile idx {{ c.tone }}">
+      <div class="ph-row"><b>{{ c.symbol }}</b><span class="xs muted">{{ c.name }}</span></div>
+      <div class="val">{{ tn(c.price) }} <span class="small {{ c.chg1|sgn }}">{{ tp(c.chg1, 2) }}</span></div>
+      <div class="xs muted">5g {{ tp(c.chg5) }} · 20g {{ tp(c.chg20) }}</div>
+      <table class="mini"><tr><td>50G</td><td class="num">{{ tn(c.sma50) }}</td></tr><tr><td>200G</td><td class="num">{{ tn(c.sma200) }}</td></tr>
+        <tr><td>Yıl zirvesi</td><td class="num">{{ tn(c.hi52) }} ({{ tp(c.from_hi) }})</td></tr><tr><td>RSI(14)</td><td class="num">{{ tn(c.rsi, 1) }}</td></tr></table>
+      <div class="chips"><span class="chip {{ c.tone }}">{{ c.trend }}</span><span class="chip">Evre {{ c.stage }} · {{ c.stage_label }}</span></div>
+      <div class="xs" style="margin-top:4px">{{ c.read|trnum }}</div>
+    </div>{% endif %}{% endfor %}
+  </div>
+
+  <div class="ph" style="margin-top:14px">Makro göstergeler</div>
+  <div class="numgrid">{% for t in P.macro %}
+    <div class="nitem"><span class="lbl">{{ t.name }}</span>
+      {% if t.value is none %}<b class="missing">doğrulanamadı</b>{% else %}
+      <b>{{ tn(t.value, 2) }}{% if t.yield %}%{% endif %}</b>
+      <span class="xs">{% if t.yield %}<span class="{{ t.d1|sgn }}">1g {{ '%+.0f'|format(t.d1) }} bp</span> · 5g {{ '%+.0f'|format(t.d5) }} · 20g {{ '%+.0f'|format(t.d20) }} bp
+      {% else %}<span class="{{ t.d1|sgn }}">1g {{ tp(t.d1) }}</span> · 5g {{ tp(t.d5) }} · 20g {{ tp(t.d20) }}{% endif %}</span>{% endif %}
+    </div>{% endfor %}</div>
+
+  <div class="grid2" style="margin-top:14px">
+    <div>
+      <div class="ph">Oynaklık · gerçekleşen (HV) ve beklenen (VIX/VXN)</div>
+      <div class="result small" style="margin-bottom:6px">{{ P.vol.result }}</div>
+      <table class="compact"><tr><th>Fon</th><th class="num">HV10</th><th class="num">HV20</th><th class="num">HV20 1y sırası</th><th class="num">Beklenen (sıra)</th></tr>
+      {% for v in P.vol.rows %}<tr><td>{{ v.symbol }}{% if v.hot %} <span class="badge warn" title="Son 10 gün son 20 günden sert">ısınıyor</span>{% endif %}</td>
+        <td class="num">%{{ tn(v.hv10, 1) }}</td><td class="num">%{{ tn(v.hv20, 1) }}</td><td class="num">{{ tn(v.hv20_pct, 0) }}</td>
+        <td class="num">{% if v.iv is defined and v.iv is not none %}{{ v.iv_sym }} {{ tn(v.iv, 2) }} ({{ tn(v.iv_pct, 0) }}){% else %}—{% endif %}</td></tr>{% endfor %}</table>
+      {% if P.vol.stress %}{% set s = P.vol.stress %}
+      <div class="ph" style="margin-top:10px">Momentum faktör stresi <span class="chip {{ 'neg' if s.ratio > 1.6 else '' }}">{{ s.level }}</span></div>
+      <div class="small">MTUM/SPY 60 günlük oynaklık oranı <b>{{ tn(s.ratio) }}</b> (sakin norm 1,2–1,6; kayıtlı 1 yılın %{{ tn(s.pct, 0) }} yüzdeliği) · MTUM %{{ tn(s.mtum_vol, 1) }}, SPY %{{ tn(s.spy_vol, 1) }}{% if s.vxn_vix %} · VXN/VIX {{ tn(s.vxn_vix) }} (norm 1,15–1,35){% endif %}</div>
+      {% endif %}
+      <details class="explain"><summary>Daha basit anlat</summary><p>HV, fiyatın son 10 veya 20 günde ne kadar sert inip çıktığının yıllık ölçeğidir. "1y sırası" bugünkü değerin son bir yıldaki yeridir (100 = yılın en serti). VIX ise opsiyonlardan okunan önümüzdeki ayın beklenen dalgalanmasıdır. Momentum fonu geniş piyasadan çok daha oynaksa kalabalık pozisyonlarda stres vardır.</p></details>
+    </div>
+    <div>
+      <div class="ph">Takvim</div>
+      <div class="numgrid" style="grid-template-columns:1fr 1fr">
+        <div class="nitem"><span class="lbl">Aylık opsiyon vadesi</span><b>{{ P.opex.date }}{% if P.opex.triple %} · üçlü vade{% endif %}</b><span class="xs muted">T-{{ P.opex.t_minus }} işlem günü (tatil kayması hesaba katılmadı)</span></div>
+        <div class="nitem"><span class="lbl">Sıradaki FOMC</span><b>{{ P.fed.next_fomc.strftime('%d.%m.%Y %H:%M') if P.fed.next_fomc else 'doğrulanamadı' }}</b><span class="xs muted">radar makro takvimi</span></div>
+        {% for s, n in P.dist.items() %}<div class="nitem"><span class="lbl">Dağıtım günü · {{ s }} (25 seans)</span><b class="{{ 'neg' if n and n >= 5 else '' }}">{{ n if n is not none else '—' }}</b><span class="xs muted">%0,2+ düşüş ve önceki günden yüksek hacim; 5+ kurumsal satış baskısı</span></div>{% endfor %}
+      </div>
+      <table class="compact" style="margin-top:8px">{% for c in P.calendar %}<tr><td class="xs muted" style="white-space:nowrap">{{ c.at.strftime('%d.%m %H:%M') }}</td><td class="small">{{ c.name }}</td><td><span class="badge imp{{ c.importance if c.importance <= 5 else 5 }}">{{ c.importance }}</span></td></tr>{% else %}<tr><td class="muted small">Önümüzdeki 10 günde önemli veri yok veya takvim boş.</td></tr>{% endfor %}</table>
+      {% for g in P.fed.kalshi %}<div class="small" style="margin-top:8px"><b>{{ g.label }}</b> <span class="muted xs">{{ g.title }}</span><br>
+        {% for it in g['items'][:4] %}<span class="chip">{{ it.label }} %{{ tn(it.prob * 100, 0) }}</span> {% endfor %}</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="ph" style="margin-top:14px">Bugün hareket edenler (portföy + izleme listesi)</div>
+  {% if P.movers %}<table class="compact"><tr><th>Sembol</th><th class="num">Fiyat</th><th class="num">Gün</th><th class="num">5 gün</th><th class="num">Hacim / 20g ort.</th></tr>
+  {% for mv in P.movers[:12] %}<tr><td><a href="/h/{{ mv.symbol }}"><b>{{ mv.symbol }}</b></a>{% if mv.held %} <span class="badge">portföy</span>{% endif %}</td><td class="num">{{ tn(mv.price) }}</td>
+    <td class="num {{ mv.chg1|sgn }}">{{ tp(mv.chg1, 2) }}</td><td class="num {{ mv.chg5|sgn }}">{{ tp(mv.chg5) }}</td><td class="num">{{ tn(mv.vol_x, 1) }}×</td></tr>{% endfor %}</table>
+  {% else %}<div class="muted small">T günü için sembol verisi yok.</div>{% endif %}
+</section>
+
+{# ── Rotasyon ── #}
+<section class="panel hsec">
+  {{ head('rotasyon', 'Rotasyon', ['Yahoo temettü-ayarlı kapanış · T ' ~ rep.day, 'FMP sektör bilgisi']) }}
+  <div class="result {{ 'pos' if R.mode == 'RISK-ON' else 'neg' if R.mode == 'RISK-OFF' else '' }}"><span class="lbl">Sonuç</span> {{ R.result }}</div>
+  {% if R.missing %}<div class="missing">doğrulanamadı: {{ R.missing|join(', ') }}</div>{% endif %}
+  {{ simple("Her sektör ve tema fonunun S&P 500'e göre gücü (göreli güç). Kadran haritası iki şeye bakar: fon piyasadan güçlü mü (sağ taraf) ve bu güç artıyor mu (üst taraf). Lider: güçlü ve hızlanıyor; Zayıflayan: güçlü ama yavaşlıyor; Gecikmeli: zayıf ve kötüleşiyor; Toparlanan: zayıf ama düzeliyor. Fonlar genelde saat yönünde döner. Haftalık veriyle hesaplanır; JdK yönteminin açık bir yaklaşımıdır.") }}
+  {% set g = rrg %}
+  <div class="grid2" style="grid-template-columns:minmax(0,1.3fr) minmax(0,1fr)">
+    <div class="rrg-wrap">{% if g['items'] %}
+      <svg viewBox="0 0 {{ g.w }} {{ g.h }}" class="rrg" role="img" aria-label="Rotasyon kadran haritası">
+        <rect x="{{ g.cx }}" y="{{ g.pad }}" width="{{ g.w - g.pad - g.cx }}" height="{{ g.cy - g.pad }}" class="q-lider"/>
+        <rect x="{{ g.cx }}" y="{{ g.cy }}" width="{{ g.w - g.pad - g.cx }}" height="{{ g.h - g.pad - g.cy }}" class="q-zayif"/>
+        <rect x="{{ g.pad }}" y="{{ g.cy }}" width="{{ g.cx - g.pad }}" height="{{ g.h - g.pad - g.cy }}" class="q-gec"/>
+        <rect x="{{ g.pad }}" y="{{ g.pad }}" width="{{ g.cx - g.pad }}" height="{{ g.cy - g.pad }}" class="q-top"/>
+        <line x1="{{ g.cx }}" y1="{{ g.pad }}" x2="{{ g.cx }}" y2="{{ g.h - g.pad }}" class="axis"/>
+        <line x1="{{ g.pad }}" y1="{{ g.cy }}" x2="{{ g.w - g.pad }}" y2="{{ g.cy }}" class="axis"/>
+        <text x="{{ g.w - g.pad - 4 }}" y="{{ g.pad + 14 }}" text-anchor="end" class="ql">Lider</text>
+        <text x="{{ g.w - g.pad - 4 }}" y="{{ g.h - g.pad - 6 }}" text-anchor="end" class="ql">Zayıflayan</text>
+        <text x="{{ g.pad + 4 }}" y="{{ g.h - g.pad - 6 }}" class="ql">Gecikmeli</text>
+        <text x="{{ g.pad + 4 }}" y="{{ g.pad + 14 }}" class="ql">Toparlanan</text>
+        <text x="{{ g.w / 2 }}" y="{{ g.h - 6 }}" text-anchor="middle" class="ax">RS-Ratio (piyasaya göre güç) →</text>
+        <text x="10" y="{{ g.h / 2 }}" text-anchor="middle" class="ax" transform="rotate(-90 10 {{ g.h / 2 }})">RS-Momentum →</text>
+        {% for it in g['items'] %}
+          {% if it.group == 'Sektör' %}<polyline points="{{ it.path }}" class="tail"/>{% endif %}
+          <circle cx="{{ it.x }}" cy="{{ it.y }}" r="4.5" class="dot-{{ it.quad|lower|replace('ı','i')|replace('ş','s')|replace('ğ','g') }} {{ 'fac' if it.group != 'Sektör' }}"/>
+          <text x="{{ it.x + 6 }}" y="{{ it.y - 5 }}" class="lab">{{ it.symbol }}</text>
+        {% endfor %}
+      </svg>
+      <div class="xs muted">Çizgi: sektör fonunun son 6 haftalık izi · soluk nokta: faktör/tema fonu</div>
+      {% else %}<div class="missing">doğrulanamadı</div>{% endif %}
+    </div>
+    <div>
+      {% for q, syms in R.by_quad.items() %}<div class="small" style="margin-bottom:6px"><span class="band {{ {'Lider':'pos','Zayıflayan':'warn','Gecikmeli':'neg','Toparlanan':'acc'}[q] }}">{{ q }}</span> {{ syms|join(' · ') or '—' }}</div>{% endfor %}
+      <div class="ph" style="margin-top:10px">Bu hafta kadran değiştirenler</div>
+      {% for c in R.changes %}<div class="small">{{ c.symbol }} <span class="muted">{{ c.name }}</span>: {{ c.prev_quad }} → <b>{{ c.quad }}</b></div>{% else %}<div class="small muted">Değişim yok.</div>{% endfor %}
+      <div class="ph" style="margin-top:10px">Senin hisselerin</div>
+      {% for x in R.mine %}<div class="small"><a href="/h/{{ x.symbol }}"><b>{{ x.symbol }}</b></a>{% if x.held %} <span class="badge">portföy</span>{% endif %}
+        <span class="muted">{{ x.sector or 'sektör doğrulanamadı' }}{% if x.etf %} → {{ x.etf }}{% endif %}</span>
+        {% if x.quad %}<span class="band {{ {'Lider':'pos','Zayıflayan':'warn','Gecikmeli':'neg','Toparlanan':'acc'}[x.quad] }}">{{ x.quad }}</span>{% endif %}</div>{% else %}<div class="small muted">Portföy veya izleme listesi boş.</div>{% endfor %}
+    </div>
+  </div>
+
+  <div class="ph" style="margin-top:14px">Göreli güç · S&P 500'e göre fark (getiri)</div>
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Fon</th><th>Kadran</th><th class="num">1 hafta</th><th class="num">4 hafta</th><th class="num">12 hafta</th><th class="num">26 hafta</th><th class="num">RS-Ratio</th><th class="num">RS-Mom.</th></tr>
+    {% for x in R.rows %}<tr><td><b>{{ x.symbol }}</b> <span class="xs muted">{{ x.name }}</span></td>
+      <td><span class="band {{ {'Lider':'pos','Zayıflayan':'warn','Gecikmeli':'neg','Toparlanan':'acc'}[x.quad] }}">{{ x.quad }}</span></td>
+      {% for k in ['1h','4h','12h','26h'] %}<td class="num {{ x.rel[k]|sgn }}" title="mutlak getiri {{ tp(x.ret[k]) }}">{{ tp(x.rel[k]) }}</td>{% endfor %}
+      <td class="num">{{ tn(x.ratio, 1) }}</td><td class="num">{{ tn(x.mom, 1) }}</td></tr>{% endfor %}
+  </table></div>
+
+  <div class="ph" style="margin-top:14px">Risk modu termometresi · 6 oran <span class="chip {{ 'pos' if R.mode == 'RISK-ON' else 'neg' if R.mode == 'RISK-OFF' else '' }}">{{ R.mode }} ({{ R.on }} on · {{ R.off }} off)</span></div>
+  <div class="numgrid">{% for k in R.risk %}
+    <div class="nitem"><span class="lbl">{{ k.pair or k.title }} · {{ k.what }}</span>
+      {% if k.value is none %}<b class="missing">doğrulanamadı</b>{% else %}
+      <b>{{ tn(k.value, 4) }} <span class="chip {{ 'pos' if k.label == 'RISK-ON' else 'neg' if k.label == 'RISK-OFF' else '' }}">{{ k.label }}</span></b>
+      <span class="xs">1h {{ tp(k.c1w) }} · 1a {{ tp(k.c1m) }} · 1y bandı %{{ tn(k.band, 0) }}</span>{% endif %}</div>{% endfor %}</div>
+  <div class="xs muted" style="margin-top:4px">Etiket: 1 aylık değişim ±%2 eşiği (altında yön ters: yükselişi risk-off). Bant: değerin son 1 yıllık aralıktaki yeri.</div>
+</section>
+
+{# ── Genişlik ── #}
+<section class="panel hsec">
+  {{ head('genislik', 'Genişlik', [(B.source if B else 'Sektör fonları (yedek)'), 'liste ' ~ (rep.constituents_stamp|local('%d.%m') if rep.constituents_stamp else 'yok')]) }}
+  {% set SB = rep.sector_breadth %}
+  {% if B %}
+  {% set pv = rep.breadth_prev or {} %}
+  <div class="result {{ 'pos' if B.above200 >= 60 else 'neg' if B.above200 < 45 else '' }}"><span class="lbl">Sonuç</span>
+    S&P 500 hisselerinin %{{ tn(B.above200, 1) }}'i 200 günlük, %{{ tn(B.above50, 1) }}'i 50 günlük ortalamasının üstünde; yükselen−düşen {{ '%+d'|format(B.adv - B.dec) }}, yeni zirve−dip {{ '%+d'|format(B.nh - B.nl) }}.
+    {% if pv %}200 günlük oranı bir önceki güne göre {{ '%+.1f'|format(B.above200 - pv.above200)|replace('.', ',') }} puan.{% endif %}</div>
+  {% if rep.breadth_stale %}<div class="missing">Genişlik verisi {{ B.day }} kapanışına ait (T'den eski): S&P 500 bileşenleri her gece kapanıştan sonra güncellenir.</div>{% endif %}
+  <div class="tiles" style="margin-top:10px">
+    <div class="tile"><div class="lbl">% 200G üstü</div><div class="val">%{{ tn(B.above200, 1) }}</div><div class="sub {{ (B.above200 - (pv.above200 or B.above200))|sgn }}">{{ '%+.1f'|format(B.above200 - (pv.above200 or B.above200))|replace('.', ',') }} puan</div></div>
+    <div class="tile"><div class="lbl">% 50G üstü</div><div class="val">%{{ tn(B.above50, 1) }}</div><div class="sub {{ (B.above50 - (pv.above50 or B.above50))|sgn }}">{{ '%+.1f'|format(B.above50 - (pv.above50 or B.above50))|replace('.', ',') }} puan</div></div>
+    <div class="tile"><div class="lbl">Yükselen − düşen</div><div class="val {{ (B.adv - B.dec)|sgn }}">{{ '%+d'|format(B.adv - B.dec) }}</div><div class="sub muted">{{ B.adv }} / {{ B.dec }} · {{ B.n }} hisse</div></div>
+    <div class="tile"><div class="lbl">Yeni zirve − dip (52h)</div><div class="val {{ (B.nh - B.nl)|sgn }}">{{ '%+d'|format(B.nh - B.nl) }}</div><div class="sub muted">{{ B.nh }} zirve · {{ B.nl }} dip (kapanış bazlı)</div></div>
+    <div class="tile"><div class="lbl">McClellan osilatör</div><div class="val {{ B.mcclellan|sgn }}">{{ tn(B.mcclellan, 1) }}</div><div class="sub muted">EMA19 − EMA39 (net yükselen)</div></div>
+    <div class="tile"><div class="lbl">Sektör genişliği</div><div class="val">{{ ('%' ~ tn(SB.pct, 0)) if SB.pct is not none else '—' }}</div><div class="sub muted">11 sektör fonunun 200G üstündekiler (temettü-ayarlı)</div></div>
+  </div>
+  {% else %}
+  <div class="result"><span class="lbl">Sonuç</span> S&P 500 hisse genişliği doğrulanamadı; yedek ölçü: 11 sektör fonunun %{{ tn(SB.pct, 0) }}'i 200 günlük üstünde.</div>
+  {% endif %}
+  {{ simple("Yükselişe kaç hissenin katıldığı. Endeks yükselirken hisselerin çoğu da kendi ortalamasının üstündeyse taban geniştir. Sadece birkaç dev şirket taşıyorsa taban dardır; bu tür yükselişler daha kırılgandır. McClellan, yükselen−düşen farkının kısa ve uzun ortalaması arasındaki farktır; sıfırın üstü kısa vadede alıcıların öne geçtiğini gösterir.") }}
+  <div class="ph" style="margin-top:10px">% 200G ve 50G üstündeki hisseler (son ~1 yıl)</div>
+  <div id="brchart" style="height:200px"></div>
+  <div class="legend xs"><span><span class="sw" style="background:#58a6ff"></span>200G üstü %</span><span><span class="sw" style="background:#d29922"></span>50G üstü %</span></div>
+</section>
+
+{# ── Sicil ── #}
+{% set S = rep.sicil %}
+<section class="panel hsec">
+  {{ head('sicil', 'Sicil', ['regime_history · ' ~ (S.first or '—') ~ ' → ' ~ rep.day]) }}
+  <div class="result"><span class="lbl">Sonuç</span> Her rejim etiketinden sonraki {{ S.horizon }} işlem gününde S&P 500 (SPY) getirisi. Aynı dönemde tüm günlerin ortalaması {{ tp(S.base_avg, 2) }} (pozitif oran %{{ tn(S.base_pos, 0) }}).</div>
+  {{ simple("Kuralın geçmişte ne kadar işe yaradığının ölçüsü. Ardışık günler birbirine çok benzediği için asıl önemli olan 'bağımsız' sayıdır: her etiketten en az 20 işlem günü arayla seçilen gözlemler. Bağımsız gözlem 20'nin altındaysa bu oranlara güvenilmez. Geçmiş, gelecek için garanti değildir; kurallar geriye dönük de hesaplandığı için bu tablo bir backtest'tir.") }}
+  <div class="table-scroll"><table class="compact">
+    <tr><th>Etiket</th><th class="num">Gün (n)</th><th class="num">Bağımsız n</th><th class="num">Ort. 20g getiri</th><th class="num">Pozitif %</th><th class="num">Bağımsız ort.</th><th class="num">Bağımsız isabet</th></tr>
+    {% for x in S.rows %}<tr><td><span class="band {{ x.tone }}">{{ x.label }}</span></td><td class="num">{{ x.n }}</td>
+      <td class="num {{ 'warn' if x.n_ind < 20 }}">{{ x.n_ind }}{% if x.n_ind < 20 %} ⚠{% endif %}</td>
+      <td class="num {{ x.avg|sgn }}">{{ tp(x.avg, 2) }}</td><td class="num">{{ ('%' ~ tn(x.pos, 0)) if x.pos is not none else '—' }}</td>
+      <td class="num {{ x.avg_ind|sgn }}">{{ tp(x.avg_ind, 2) }}</td><td class="num">{{ ('%' ~ tn(x.hit_ind, 0)) if x.hit_ind is defined and x.hit_ind is not none else '—' }}</td></tr>{% endfor %}
+  </table></div>
+  {% if S.rows|selectattr('n_ind', 'lt', 20)|list %}<div class="flash err small" style="margin-top:8px">⚠ Bağımsız gözlem sayısı 20'nin altında olan etiketler henüz kanıtlanmadı; bu sinyal türüne dayanarak karar verme.</div>{% endif %}
+  <div class="xs muted" style="margin-top:6px">İsabet: boğa ve nötr etiketlerde sonraki 20 günün pozitif, Risk-off ve Ayı'da negatif olması. Kayıt: {{ S.days }} işlem günü (geriye dönük hesap dahil).</div>
+</section>
+
+<details class="explain"><summary>Bu sayfa nasıl hesaplanıyor?</summary>
+  <p>Her sayı sunucuda, aynı T günü kapanışından hesaplanır; model yalnızca en üstteki tek özet cümleyi yazar ve o cümlede girdide olmayan sayı varsa metin reddedilip şablon kullanılır. Fiyatlar Yahoo'dan (ücretsiz, günlük); S&P 500 bileşen listesi Wikipedia'dan (haftalık önbellek); takvim ve tahmin piyasaları radarın kendi kayıtlarından.</p>
+  <p>Yaklaşık olanlar: rotasyon kadranı JdK RRG'nin açık bir yaklaşımıdır; yeni zirve/dip kapanış bazlıdır (gün içi değil); bileşen listesi bugünkü listedir (geçmiş günlerde endekste olmayan hisseler de sayılır — hayatta kalma yanlılığı); opsiyon vadesi tatil kaymasını hesaba katmaz. Duyarlılık anketleri (CNN, AAII) ve bilanço sezonu istatistikleri ücretsiz kaynakta olmadığı için yer almıyor.</p>
+</details>
+{% endif %}
+
+<script src="/static/lightweight-charts.js"></script>
+<script>
+(() => {
+  const opts = h => ({ height: h, layout: { background: { color: '#161b22' }, textColor: '#c9d1d9' },
+    grid: { vertLines: { color: '#21262d' }, horzLines: { color: '#21262d' } }, rightPriceScale: { borderColor: '#2a3140' }, timeScale: { borderColor: '#2a3140' } });
+  const hist = {{ (rep.history or [])|tojson }};
+  const br = {{ (rep.breadth_hist or [])|map(attribute='day')|list|tojson }};
+  const b200 = {{ (rep.breadth_hist or [])|map(attribute='above200')|list|tojson }};
+  const b50 = {{ (rep.breadth_hist or [])|map(attribute='above50')|list|tojson }};
+  function mk(id, h) { const el = document.getElementById(id); if (!el) return null;
+    const c = LightweightCharts.createChart(el, opts(h)); new ResizeObserver(() => c.applyOptions({ width: el.clientWidth })).observe(el); return c; }
+  const rc = mk('regchart', 170);
+  if (rc && hist.length) {
+    const s = rc.addBaselineSeries({ baseValue: { type: 'price', price: 50 }, topLineColor: '#3fb950', bottomLineColor: '#f85149',
+      topFillColor1: 'rgba(63,185,80,.2)', topFillColor2: 'rgba(63,185,80,0)', bottomFillColor1: 'rgba(248,81,73,0)', bottomFillColor2: 'rgba(248,81,73,.2)', lineWidth: 2 });
+    s.setData(hist.filter(x => x.overall !== null).map(x => ({ time: x.day, value: x.overall })));
+    [70, 58, 45, 32].forEach(p => s.createPriceLine({ price: p, color: '#2a3140', lineStyle: 2, lineWidth: 1, axisLabelVisible: false }));
+    rc.timeScale().fitContent();
+  }
+  const bc = mk('brchart', 200);
+  if (bc && br.length) {
+    const a = bc.addLineSeries({ color: '#58a6ff', lineWidth: 2 }); const b = bc.addLineSeries({ color: '#d29922', lineWidth: 1 });
+    a.setData(br.map((d, i) => ({ time: d, value: b200[i] })).filter(x => x.value !== null));
+    b.setData(br.map((d, i) => ({ time: d, value: b50[i] })).filter(x => x.value !== null));
+    a.createPriceLine({ price: 50, color: '#8b949e', lineStyle: 2, lineWidth: 1, title: '50' });
+    bc.timeScale().fitContent();
+  }
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Borsa Radar{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+</head>
+<body>
+<header>
+  <nav class="nav">
+    <a class="brand" href="/">📡 Borsa Radar</a>
+    {% for title, href, subs in nav %}<a href="{{ href }}" class="{{ 'active' if nav_section == title }}">{{ title }}</a>{% endfor %}
+    <form class="navsearch" action="/h" method="get"><input name="s" placeholder="Hisse ara (AMZN)" aria-label="Hisse ara" autocomplete="off"></form>
+    <span class="sep"></span>
+    {% for t in nav_tickers %}
+      <a class="tk {% if request.url.path.startswith('/h/' ~ t.symbol) %}active{% endif %}" href="/h/{{ t.symbol }}">{{ t.symbol }}</a>
+    {% endfor %}
+    <span class="sep"></span>
+    <span class="muted" style="font-size:12px">{% if market_open() %}🟢 ABD piyasası açık{% else %}⚫ ABD piyasası kapalı{% endif %}</span>
+  </nav>
+  {% if nav_subs|length > 1 %}<nav class="subnav">{% for title, href in nav_subs %}<a href="{{ href }}" class="{{ 'active' if nav_sub_active == href }}">{{ title }}</a>{% endfor %}</nav>{% endif %}
+</header>
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}Ayarlar · Borsa Radar{% endblock %}
+{% block content %}
+<div class="pf-head"><div><h1 style="margin-bottom:2px">Ayarlar</h1><p class="lede">Bildirim eşikleri, sessiz saatler, özet saatleri, model, setup havuzu ve portföy takibi.</p></div></div>
+{% if saved == 1 %}<div class="flash">Kaydedildi.</div>{% elif saved == 2 %}<div class="flash">Test mesajı gönderildi.</div>{% elif saved == 3 %}<div class="flash err">Telegram gönderimi başarısız (aşağıdaki bildirim geçmişine bakın).</div>{% endif %}
+<div class="grid">
+  <section>
+    <form method="post" class="panel">
+      <div class="kv" style="grid-template-columns:300px 1fr">
+        {% for k, label in labels.items() %}
+          <label for="{{ k }}" class="muted">{{ label }}</label><input id="{{ k }}" name="{{ k }}" value="{{ s[k] }}">
+        {% endfor %}
+      </div>
+      <div style="margin-top:12px"><button>Kaydet</button></div>
+    </form>
+    <form method="post" action="/settings/test-telegram" style="margin-top:8px"><button class="secondary">Telegram test mesajı gönder</button></form>
+
+    <h2>Son bildirimler</h2>
+    <div class="panel">
+      <table>
+        {% for n in notif %}
+        <tr><td class="muted" style="white-space:nowrap">{{ n.created_at|local }}</td><td>{{ n.kind }}</td>
+            <td>{{ n.status }}{% if n.error %} <span class="neg" style="font-size:12px">{{ n.error }}</span>{% endif %}</td>
+            <td style="font-size:12px">{{ (n.text|striptags)[:110] }}</td></tr>
+        {% else %}<tr><td class="muted">Henüz yok</td></tr>{% endfor %}
+      </table>
+    </div>
+  </section>
+  <aside>
+    <div class="panel">
+      <h2 style="margin-top:0">Sistem</h2>
+      <div class="kv" style="grid-template-columns:130px 1fr">
+        <span class="muted">LLM çağrısı (bugün)</span><span>{{ llm_today }} / {{ s.llm_daily_cap }}</span>
+        <span class="muted">Boş disk</span><span>{{ '%.1f'|format(disk) }} GB</span>
+      </div>
+      <h2>Olaylar</h2>
+      <table>{% for c in counts %}<tr><td>{{ c.type }}</td><td class="muted">{{ c.status }}</td><td class="num">{{ c.n }}</td></tr>{% endfor %}</table>
+      <h2>Görevler</h2>
+      <table>
+        {% for j in jobs %}
+        <tr title="{{ j.last_error or '' }}"><td>{{ j.job }}</td><td class="muted" style="font-size:12px">{{ j.last_run|ago }}</td>
+          <td>{% if j.last_error %}<span class="neg">✗</span>{% else %}<span class="pos">✓</span>{% endif %}</td></tr>
+        {% endfor %}
+      </table>
+    </div>
+  </aside>
+</div>
+{% endblock %}
